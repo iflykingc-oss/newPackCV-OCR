@@ -1,48 +1,160 @@
-node_modules
-dist
-.DS_Store
-*.swp
-.git/*
+# Python
 __pycache__/
-*.pyc
-.venv
-*.o
-*.a
-/vendor
+*.py[cod]
+*$py.class
+*.so
+.Python
+build/
+develop-eggs/
+dist/
+downloads/
+eggs/
+.eggs/
+lib/
+lib64/
+parts/
+sdist/
+var/
+wheels/
 *.egg-info/
-/.env
+.installed.cfg
+*.egg
+
+# Virtual Environment
+venv/
+ENV/
+env/
+.venv
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+*~
+
+# OS
+.DS_Store
+Thumbs.db
+
+# Logs
+*.log
+logs/
+*.out
+
+# Database
+*.db
+*.sqlite
+*.sqlite3
+
+# Environment variables
 .env
+.env.local
+.env.*.local
 
-# 视频文件
-*.mp4
-*.avi
-*.mov
-*.wmv
-*.flv
-*.mkv
-*.webm
-*.m4v
-*.mpeg
-*.mpg
-*.3gp
-*.f4v
-*.rmvb
-*.vob
+# Temporary files
+*.tmp
+*.temp
+*.bak
+*.swp
+~*
 
-# 归档文件
-*.iso
-*.dmg
-*.rar
+# Test coverage
+.coverage
+htmlcov/
+.pytest_cache/
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Jupyter Notebook
+.ipynb_checkpoints
+
+# pyenv
+.python-version
+
+# pipenv
+Pipfile.lock
+
+# PEP 582
+__pypackages__/
+
+# Celery
+celerybeat-schedule
+celerybeat.pid
+
+# SageMath
+*.sage.py
+
+# Environments
+.env
+.venv
+env/
+venv/
+ENV/
+env.bak/
+venv.bak/
+
+# Spyder project settings
+.spyderproject
+.spyproject
+
+# Rope project settings
+.ropeproject
+
+# mkdocs documentation
+/site
+
+# mypy
+.mypy_cache/
+.dmypy.json
+dmypy.json
+
+# Pyre type checker
+.pyre/
+
+# pytype static type analyzer
+.pytype/
+
+# Cython debug symbols
+cython_debug/
+
+# PyCharm
+.idea/
+
+# Local testing
+assets/mock/
+tmp/
+temp/
+
+# Database backups
+*.sql.bak
+*.db.bak
+
+# Model cache
+models_cache/
+*.pth
+*.pt
+*.onnx
+
+# YOLOv8 models
+runs/
+yolov8*.pt
+
+# Uploads
+uploads/
+tmp_uploads/
+
+# Large files
 *.zip
-*.gz
+*.tar
+*.tar.gz
+*.rar
+*.7z
 
-# 文档类也默认加入
-*.pdf
-*.docx
-*.doc
-*.xlsx
-*.xls
-*.ppt
-*.pptx
-*.xlsx
-*.csv
+# Keep PUSH_TO_GITHUB.md and other important files
+!PUSH_TO_GITHUB.md
+!AGENTS.md
+!README.md
