@@ -39,6 +39,15 @@
 | alert_engine | `nodes/alert_engine_node.py` | task | 智能告警引擎，效期/库存/合规告警 | - | - |
 | report_generation | `nodes/report_generation_node.py` | task | 自动报表生成，效期/库存/合规台账 | - | - |
 
+### V1.1 优化新增节点
+| 节点名 | 文件位置 | 类型 | 功能描述 | 分支逻辑 | 配置文件 |
+|--------|---------|------|---------|---------|---------|
+| image_preprocess_enhance | `nodes/image_preprocess_enhance_node.py` | task | 图像预处理增强（方向分类、去畸变、去噪、增强） | - | - |
+| text_direction_correct | `nodes/text_direction_correct_node.py` | task | 文本方向矫正（边缘投影法、PaddleOCR分类） | - | - |
+| layout_parse | `nodes/layout_parse_node.py` | task | 智能排版解析（多栏布局、自然段换行、保留缩进） | - | - |
+| ignore_region | `nodes/ignore_region_node.py` | task | 忽略区域配置（排除水印、LOGO） | - | - |
+| text_post_process | `nodes/text_post_process_node.py` | task | 文本后处理（半全角转换、文本纠错、格式规范化） | - | - |
+
 **类型说明**: task(任务节点) / agent(大模型节点) / condition(条件分支节点)
 
 ---
@@ -97,6 +106,110 @@
 2. 支持PaddleOCR和Tesseract OCR两种引擎
 3. 合并所有识别结果
 4. 支持导出为Excel或PDF格式
+
+---
+
+## V1.1 优化功能（新增）
+
+### 优化背景
+基于对 Umi-OCR（41.2k stars）、PaddleOCR 3.0（52.4k stars）、MMOCR 等先进OCR项目的调研，V1.1 版本新增5个核心节点，提升复杂场景下的识别准确率和用户体验。
+
+### 新增功能特性
+
+#### 1. 图像预处理增强节点 (`image_preprocess_enhance`)
+- **文档方向分类**: 自动识别图像方向（0/90/180/270度）
+- **文档去畸变**: 解决拍摄倾斜问题（边缘投影法）
+- **图像去噪**: 高斯模糊去噪
+- **图像增强**:
+  - CLAHE对比度增强
+  - 锐化处理
+  - 反光消除
+- **预期效果**: 倾斜文档识别准确率提升30%
+
+#### 2. 文本方向矫正节点 (`text_direction_correct`)
+- **边缘投影法**: 适用于小角度倾斜（±45度以内）
+- **PaddleOCR分类模型**: 适用于大角度旋转（90/180/270度）
+- **自动旋转矫正**: 基于检测到的角度自动旋转
+- **置信度计算**: 输出矫正置信度
+- **预期效果**: 旋转文本识别准确率提升25%
+
+#### 3. 智能排版解析节点 (`layout_parse`)
+- **多栏布局识别**: 自动检测单栏、双栏、多栏布局
+- **自然段换行**: 按段落规则智能换行
+- **保留缩进**: 适用于代码、表格等需要保留缩进的内容
+- **横排/竖排文本处理**: 支持从右到左的竖排文本
+- **预期效果**: 复杂排版解析准确率95%+
+
+#### 4. 忽略区域配置节点 (`ignore_region`)
+- **矩形区域标注**: 绘制多个矩形框指定忽略区域
+- **排除水印、LOGO**: 自动排除水印、LOGO、页眉页脚
+- **智能匹配**: 支持模板匹配和位置匹配
+- **自动检测水印**: 基于关键词和置信度自动检测水印
+- **预期效果**: 减少干扰，提升识别准确率15%
+
+#### 5. 文本后处理节点 (`text_post_process`)
+- **半全角转换**: 自动转换半全角字符
+- **文本纠错**: 基于规则的文本纠错（生产曰期→生产日期）
+- **格式规范化**:
+  - 日期格式统一（YYYY-MM-DD）
+  - 数字千分位格式化
+- **去重与合并**: 清理多余空格和换行
+- **预期效果**: 提升文本质量和可读性
+
+### 技术选型
+- **OCR引擎**: PaddleOCR 3.1.0（PP-OCRv5多语言模型）
+- **图像处理**: OpenCV
+- **排版解析**: K-means聚类（栏识别）
+- **文本处理**: 正则表达式、规则纠错
+
+### 预期整体效果
+- 倾斜文档识别准确率提升: +30%
+- 弯曲文本识别准确率提升: +49.5%（LCTP算法，待实现）
+- 旋转文本识别准确率提升: +25%
+- 多语言文档识别准确率提升: +20%
+- 复杂排版解析准确率: >95%
+
+### 依赖安装
+```bash
+# PaddleOCR
+uv add paddlepaddle paddleocr
+
+# 图像处理
+uv add opencv-python-headless
+
+# 机器学习（K-means）
+uv add scikit-learn
+
+# 文本处理
+uv add pycorrector  # 文本纠错（可选）
+```
+
+### 使用示例
+```python
+from graphs.state import ImagePreprocessEnhanceInput
+from graphs.nodes.image_preprocess_enhance_node import image_preprocess_enhance_node
+
+# 图像预处理增强
+input_state = ImagePreprocessEnhanceInput(
+    image=File(url="image_url"),
+    enable_orientation_classify=True,
+    enable_dewarp=True,
+    enable_denoise=True,
+    enable_enhance=True
+)
+
+output = image_preprocess_enhance_node(
+    state=input_state,
+    config=RunnableConfig(),
+    runtime=Runtime[Context]
+)
+
+print(f"处理后的图片: {output.preprocessed_image.url}")
+print(f"检测到的角度: {output.orientation_angle}")
+print(f"增强步骤: {output.enhancement_steps}")
+```
+
+详细优化方案请参考 `OPTIMIZATION_PLAN.md` 文档。
 
 ### 单图处理流程
 当输入参数只包含 `package_image` 字段时，系统进入单图处理模式：

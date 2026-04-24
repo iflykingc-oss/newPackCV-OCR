@@ -417,5 +417,144 @@ class PackCVGraphOutput(BaseModel):
     alerts: List[Dict[str, Any]] = Field(default_factory=list, description="告警列表")
     reports: Dict[str, Any] = Field(default_factory=dict, description="报表URLs")
     total_products: int = Field(default=0, description="总商品数")
+
+
+# ==================== V1.1 新增节点状态定义 ====================
+
+# --- 图像预处理增强节点（V1.1新增）---
+
+class ImagePreprocessEnhanceInput(BaseModel):
+    """图像预处理增强节点输入"""
+    image: File = Field(..., description="原始图片")
+    enable_orientation_classify: bool = Field(default=True, description="是否启用方向分类")
+    enable_dewarp: bool = Field(default=True, description="是否启用去畸变")
+    enable_denoise: bool = Field(default=True, description="是否启用去噪")
+    enable_enhance: bool = Field(default=True, description="是否启用增强")
+    enhance_denoise_kernel: int = Field(default=3, description="去噪核大小")
+    enhance_contrast: float = Field(default=1.5, description="对比度增强系数")
+
+
+class ImagePreprocessEnhanceOutput(BaseModel):
+    """图像预处理增强节点输出"""
+    preprocessed_image: File = Field(..., description="预处理后的图片")
+    orientation_angle: int = Field(default=0, description="检测到的方向角度（0/90/180/270）")
+    is_corrected: bool = Field(default=False, description="是否进行了矫正")
+    enhancement_steps: List[str] = Field(default_factory=list, description="执行的增强步骤")
+    processing_time: float = Field(default=0.0, description="处理耗时（秒）")
+
+
+# --- 文本方向矫正节点（V1.1新增）---
+
+class TextDirectionCorrectInput(BaseModel):
+    """文本方向矫正节点输入"""
+    image: File = Field(..., description="输入图片")
+    use_edge_projection: bool = Field(default=True, description="是否使用边缘投影法")
+    use_cls_model: bool = Field(default=True, description="是否使用分类模型")
+    angle_range: int = Field(default=45, description="角度搜索范围（±angle）")
+
+
+class TextDirectionCorrectOutput(BaseModel):
+    """文本方向矫正节点输出"""
+    corrected_image: File = Field(..., description="矫正后的图片")
+    detected_angle: float = Field(default=0.0, description="检测到的旋转角度")
+    correction_method: str = Field(default="", description="使用的矫正方法")
+    confidence: float = Field(default=0.0, description="置信度")
+    processing_time: float = Field(default=0.0, description="处理耗时（秒）")
+
+
+# --- 智能排版解析节点（V1.1新增）---
+
+class LayoutParseInput(BaseModel):
+    """智能排版解析节点输入"""
+    ocr_regions: List[Dict[str, Any]] = Field(default_factory=list, description="OCR识别区域列表")
+    parse_mode: Literal["auto", "multi_column", "single_column", "preserve_indent"] = Field(default="auto", description="解析模式")
+    enable_paragraph_break: bool = Field(default=True, description="是否启用自然段换行")
+    enable_vertical_text: bool = Field(default=True, description="是否支持竖排文本")
+
+
+class LayoutParseOutput(BaseModel):
+    """智能排版解析节点输出"""
+    parsed_text: str = Field(default="", description="解析后的文本")
+    layout_type: str = Field(default="", description="检测到的布局类型（single_column/multi_column）")
+    paragraph_count: int = Field(default=0, description="段落数量")
+    column_count: int = Field(default=1, description="栏数")
+    processing_time: float = Field(default=0.0, description="处理耗时（秒）")
+
+
+# --- 忽略区域配置节点（V1.1新增）---
+
+class IgnoreRegionInput(BaseModel):
+    """忽略区域配置节点输入"""
+    image: File = Field(..., description="输入图片")
+    ocr_regions: List[Dict[str, Any]] = Field(default_factory=list, description="OCR识别区域列表")
+    ignore_regions: List[Dict[str, int]] = Field(default_factory=list, description="忽略区域列表（x1,y1,x2,y2）")
+    auto_detect_watermark: bool = Field(default=True, description="是否自动检测水印")
+    watermark_threshold: float = Field(default=0.9, description="水印检测阈值")
+
+
+class IgnoreRegionOutput(BaseModel):
+    """忽略区域配置节点输出"""
+    filtered_regions: List[Dict[str, Any]] = Field(default_factory=list, description="过滤后的OCR区域")
+    filtered_text: str = Field(default="", description="过滤后的文本")
+    ignored_count: int = Field(default=0, description="忽略的区域数量")
+    detected_watermarks: List[Dict[str, Any]] = Field(default_factory=list, description="检测到的水印位置")
+    processing_time: float = Field(default=0.0, description="处理耗时（秒）")
+
+
+# --- 文本后处理节点（V1.1新增）---
+
+class TextPostProcessInput(BaseModel):
+    """文本后处理节点输入"""
+    text: str = Field(default="", description="输入文本")
+    enable_full_half_convert: bool = Field(default=True, description="是否启用半全角转换")
+    enable_spell_correct: bool = Field(default=True, description="是否启用拼写纠错")
+    enable_format_normalize: bool = Field(default=True, description="是否启用格式规范化")
+    enable_cleanup_whitespace: bool = Field(default=True, description="是否启用清理多余空格")
+
+
+class TextPostProcessOutput(BaseModel):
+    """文本后处理节点输出"""
+    processed_text: str = Field(default="", description="处理后的文本")
+    corrections: List[Dict[str, str]] = Field(default_factory=list, description="进行的纠错列表（原文->修正）")
+    correction_count: int = Field(default=0, description="纠错数量")
+    processing_steps: List[str] = Field(default_factory=list, description="执行的处理步骤")
+
+
+# --- 多语言OCR支持节点（V1.1新增）---
+
+class MultiLangOCRInput(BaseModel):
+    """多语言OCR支持节点输入"""
+    image: File = Field(..., description="输入图片")
+    languages: List[Literal["ch", "en", "japan", "korean", "fr", "es", "ru", "de"]] = Field(default=["ch"], description="支持的语言列表")
+    auto_detect: bool = Field(default=True, description="是否自动检测语言")
+    use_angle_cls: bool = Field(default=True, description="是否使用角度分类")
+    use_structure_analysis: bool = Field(default=False, description="是否使用结构分析")
+
+
+class MultiLangOCROutput(BaseModel):
+    """多语言OCR支持节点输出"""
+    ocr_text: str = Field(default="", description="识别的文本")
+    detected_languages: List[str] = Field(default_factory=list, description="检测到的语言")
+    regions: List[Dict[str, Any]] = Field(default_factory=list, description="识别区域列表")
+    confidence: float = Field(default=0.0, description="平均置信度")
+    processing_time: float = Field(default=0.0, description="处理耗时（秒）")
+
+
+# --- 弯曲文本矫正节点（V1.1新增）---
+
+class CurvedTextCorrectInput(BaseModel):
+    """弯曲文本矫正节点输入"""
+    image: File = Field(..., description="弯曲文本图片")
+    correction_method: Literal["lctp", "thin_plate_spline", "polynomial"] = Field(default="lctp", description="矫正方法")
+    detect_curvature: bool = Field(default=True, description="是否检测弯曲程度")
+
+
+class CurvedTextCorrectOutput(BaseModel):
+    """弯曲文本矫正节点输出"""
+    corrected_image: File = Field(..., description="矫正后的图片")
+    curvature_degree: float = Field(default=0.0, description="弯曲程度（0=平直，1=严重弯曲）")
+    keypoints: List[Dict[str, float]] = Field(default_factory=list, description="检测到的关键拐点")
+    is_curved: bool = Field(default=False, description="是否为弯曲文本")
+    processing_time: float = Field(default=0.0, description="处理耗时（秒）")
     processing_time: float = Field(default=0.0, description="总处理耗时")
     error_message: Optional[str] = Field(default=None, description="错误信息")
