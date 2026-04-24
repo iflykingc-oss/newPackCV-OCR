@@ -15,6 +15,8 @@ class GlobalState(BaseModel):
     """全局状态定义 - 包含工作流流转的所有数据"""
     # 输入数据（从GraphInput合并）
     package_image: File = Field(..., description="包装图片（瓶子、包装盒、包装袋等）")
+    images: Optional[List[File]] = Field(default=None, description="多张图片列表（批量处理）")
+    processing_mode: Optional[str] = Field(default="single", description="处理模式：single（单图）或 batch（批量）")
     ocr_engine_type: Literal["builtin", "api"] = Field(default="builtin", description="OCR引擎类型")
     ocr_api_config: Optional[Dict[str, Any]] = Field(default=None, description="OCR API配置")
     model_type: Literal["extract", "correct", "qa"] = Field(default="extract", description="模型调用类型")
@@ -47,7 +49,8 @@ class GlobalState(BaseModel):
 
 class GraphInput(BaseModel):
     """工作流输入"""
-    package_image: File = Field(..., description="上传的包装图片")
+    package_image: File = Field(..., description="上传的包装图片（单图处理）")
+    images: Optional[List[File]] = Field(default=None, description="上传的图片列表（批量处理，优先级高于package_image）")
     ocr_engine_type: Literal["builtin", "api"] = Field(default="builtin", description="OCR引擎类型：builtin（内置算法）或 api（外部API）")
     ocr_api_config: Optional[Dict[str, Any]] = Field(default=None, description="OCR API配置（当engine_type=api时使用）")
     model_type: Literal["extract", "correct", "qa"] = Field(default="extract", description="模型调用类型：extract（结构化提取）、correct（智能纠错）、qa（语义问答）")
@@ -192,18 +195,36 @@ class ResultOutputOutput(BaseModel):
     platform_push_result: Dict[str, Any] = Field(default_factory=dict, description="平台推送结果")
 
 
+# ==================== 路由处理节点 ====================
+
+class RouteProcessingInput(BaseModel):
+    """路由处理节点输入"""
+    images: Optional[List[File]] = Field(default=None, description="多张图片列表（批量处理）")
+    package_image: File = Field(default=..., description="包装图片（单图处理）")
+
+
+class RouteProcessingOutput(BaseModel):
+    """路由处理节点输出"""
+    processing_mode: str = Field(default="single", description="处理模式：single（单图）或 batch（批量）")
+
+
 # ==================== 批量处理节点 ====================
 
 class BatchProcessInput(BaseModel):
     """批量处理节点输入"""
-    image_list: List[File] = Field(..., description="待处理的图片列表")
-    ocr_engine_type: Literal["builtin", "api"] = Field(default="builtin", description="OCR引擎类型")
+    images: List[File] = Field(..., description="待处理的图片列表")
+    ocr_engine_type: Literal["builtin", "api", "tesseract"] = Field(default="builtin", description="OCR引擎类型")
     ocr_api_config: Optional[Dict[str, Any]] = Field(default=None, description="OCR API配置")
-    llm_config: Optional[Dict[str, Any]] = Field(default=None, description="模型配置")
+    export_format: Literal["json", "excel", "pdf"] = Field(default="json", description="导出格式")
+    model_type: Optional[Literal["extract", "correct", "qa"]] = Field(default=None, description="模型调用类型（可选）")
+    model_name: Optional[str] = Field(default="doubao-seed-2-0-pro-260215", description="使用的模型名称")
 
 
 class BatchProcessOutput(BaseModel):
     """批量处理节点输出"""
     results: List[Dict[str, Any]] = Field(default_factory=list, description="每个图片的处理结果列表")
-    summary: Dict[str, Any] = Field(default_factory=dict, description="批量处理摘要（总数、成功数、失败数等）")
-    merged_export_url: Optional[str] = Field(default=None, description="合并导出文件URL")
+    all_text: str = Field(default="", description="所有识别文本合并")
+    success_count: int = Field(default=0, description="成功数量")
+    failed_count: int = Field(default=0, description="失败数量")
+    errors: List[str] = Field(default_factory=list, description="错误信息列表")
+    export_file_url: Optional[str] = Field(default=None, description="导出文件URL")
