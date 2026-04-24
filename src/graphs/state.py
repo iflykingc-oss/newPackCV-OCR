@@ -556,5 +556,90 @@ class CurvedTextCorrectOutput(BaseModel):
     keypoints: List[Dict[str, float]] = Field(default_factory=list, description="检测到的关键拐点")
     is_curved: bool = Field(default=False, description="是否为弯曲文本")
     processing_time: float = Field(default=0.0, description="处理耗时（秒）")
-    processing_time: float = Field(default=0.0, description="总处理耗时")
+
+
+# ==================== V1.2 新增节点状态定义 ====================
+
+# --- 图像超分辨率增强节点（V1.2新增）---
+
+class SuperResolutionEnhanceInput(BaseModel):
+    """图像超分辨率增强节点输入"""
+    image: File = Field(..., description="输入图片")
+    model_name: Literal["EDSR", "ESPCN", "FSRCNN"] = Field(default="EDSR", description="超分辨率模型")
+    scale_factor: int = Field(default=3, description="放大倍数（2/3/4）")
+    target_dpi: int = Field(default=300, description="目标DPI")
+    enable_sharpen: bool = Field(default=True, description="是否启用锐化")
+
+
+class SuperResolutionEnhanceOutput(BaseModel):
+    """图像超分辨率增强节点输出"""
+    enhanced_image: File = Field(..., description="增强后的图片")
+    original_size: tuple = Field(default=(0, 0), description="原始尺寸（width, height）")
+    enhanced_size: tuple = Field(default=(0, 0), description="增强后尺寸（width, height）")
+    scale_factor: int = Field(default=1, description="实际放大倍数")
+    enhancement_score: float = Field(default=0.0, description="增强评分（0-1）")
+    processing_time: float = Field(default=0.0, description="处理耗时（秒）")
+
+
+# --- 智能ROI切割与增强节点（V1.2新增）---
+
+class SmartROIExtractInput(BaseModel):
+    """智能ROI切割与增强节点输入"""
+    image: File = Field(..., description="输入图片")
+    target_fields: List[Literal["brand", "production_date", "expiry_date", "batch_number", "barcode", "specification"]] = Field(
+        default_factory=list,
+        description="目标字段列表"
+    )
+    enable_sr_enhance: bool = Field(default=True, description="是否启用超分辨率增强")
+    sr_scale_factor: int = Field(default=3, description="超分辨率放大倍数")
+    roi_padding: float = Field(default=0.1, description="ROI边界扩展比例（0-1）")
+
+
+class SmartROIExtractOutput(BaseModel):
+    """智能ROI切割与增强节点输出"""
+    roi_regions: List[Dict[str, Any]] = Field(default_factory=list, description="ROI区域列表")
+    enhanced_rois: List[File] = Field(default_factory=list, description="增强后的ROI图片URL列表")
+    extracted_texts: List[Dict[str, str]] = Field(default_factory=list, description="提取的文本列表")
+    field_classification: Dict[str, List[Dict[str, Any]]] = Field(default_factory=dict, description="字段分类结果")
+    processing_time: float = Field(default=0.0, description="处理耗时（秒）")
+
+
+# --- 多模态验证节点（V1.2新增）---
+
+class MultiModalValidationInput(BaseModel):
+    """多模态验证节点输入"""
+    image: File = Field(..., description="输入图片")
+    extracted_info: Dict[str, Any] = Field(default_factory=dict, description="已提取的信息")
+    enable_logic_validation: bool = Field(default=True, description="是否启用逻辑验证")
+    enable_consistency_check: bool = Field(default=True, description="是否启用一致性检查")
+    validation_rules: List[str] = Field(default_factory=list, description="验证规则列表")
+
+
+class MultiModalValidationOutput(BaseModel):
+    """多模态验证节点输出"""
+    is_valid: bool = Field(default=True, description="是否验证通过")
+    validation_results: Dict[str, Any] = Field(default_factory=dict, description="验证结果详情")
+    corrected_info: Dict[str, Any] = Field(default_factory=dict, description="修正后的信息")
+    validation_errors: List[Dict[str, str]] = Field(default_factory=list, description="验证错误列表")
+    processing_time: float = Field(default=0.0, description="处理耗时（秒）")
+
+
+# --- 细粒度商品识别节点（V1.2新增）---
+
+class FineGrainedRecognitionInput(BaseModel):
+    """细粒度商品识别节点输入"""
+    image: File = Field(..., description="输入图片")
+    detection_boxes: List[Dict[str, Any]] = Field(default_factory=list, description="检测框列表")
+    ocr_results: List[Dict[str, Any]] = Field(default_factory=list, description="OCR结果列表")
+    enable_multimodal_fusion: bool = Field(default=True, description="是否启用多模态融合")
+    enable_barcode_recognition: bool = Field(default=True, description="是否启用条形码识别")
+
+
+class FineGrainedRecognitionOutput(BaseModel):
+    """细粒度商品识别节点输出"""
+    recognized_products: List[Dict[str, Any]] = Field(default_factory=list, description="识别的商品列表")
+    product_attributes: Dict[str, List[str]] = Field(default_factory=dict, description="商品属性（规格、年份、批次等）")
+    recognition_confidence: float = Field(default=0.0, description="整体识别置信度")
+    processing_time: float = Field(default=0.0, description="处理耗时（秒）")
+
     error_message: Optional[str] = Field(default=None, description="错误信息")
