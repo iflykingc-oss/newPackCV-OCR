@@ -127,15 +127,16 @@ def perform_structure_parse(
         }
     """
     try:
-        from paddleocr import PPStructure
+        from paddleocr import PPStructureV3
         
         print(f"[文档解析] 使用PP-StructureV3解析")
         
-        # 初始化PPStructure
-        structure = PPStructure(
-            image_orientation=True,  # 文档方向检测
+        # 初始化PPStructureV3
+        structure = PPStructureV3(
+            use_doc_orientation_classify=True,  # 文档方向检测
             layout=True,  # 版面解析
-            table=enable_table_recognition,  # 表格识别
+            use_table_recognition=enable_table_recognition,  # 表格识别
+            use_seal_recognition=enable_seal_recognition,  # 印章识别
             ocr=True,  # 文本识别
             show_log=False,
             
@@ -157,7 +158,7 @@ def perform_structure_parse(
         result = structure(image, return_ocr_result_in_table=True)
         
         # 解析结果
-        return parse_structure_result(result, export_format)
+        return parse_structure_result(result, export_format, enable_table_recognition)
     
     except ImportError as e:
         print(f"[文档解析] 无法导入PaddleOCR PP-Structure: {str(e)}")
@@ -170,7 +171,7 @@ def perform_structure_parse(
         return perform_structure_fallback(image, parse_mode)
 
 
-def parse_structure_result(result: List, export_format: str) -> Dict[str, Any]:
+def parse_structure_result(result: List, export_format: str, enable_table_recognition: bool = True) -> Dict[str, Any]:
     """
     解析PP-StructureV3返回结果
     """
