@@ -295,7 +295,7 @@ def detect_with_opencv_fallback(
             
             # 计算四个角点
             box = cv2.boxPoints(rect)
-            box = np.int32(box)
+            box = np.array(box, dtype=np.int32)
             
             detected_objects.append({
                 "bbox": [float(cx), float(cy), float(max(w, h)), float(max(w, h)), float(angle)],
