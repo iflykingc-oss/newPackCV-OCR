@@ -13,6 +13,11 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from coze_coding_utils.runtime_ctx.context import Context
 
+# 标准库导入
+import cv2
+import numpy as np
+import requests
+
 from graphs.state import (
     MultiLanguageOCRInput,
     MultiLanguageOCROutput
