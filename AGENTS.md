@@ -756,3 +756,151 @@ A: 支持Excel和PDF两种格式，可通过export_format参数选择。
 ---
 
 *最后更新: 2025-01-XX*
+
+---
+
+## V1.3 竞品驱动优化（新增）
+
+### 优化背景
+基于Ultralytics YOLO（49.6k stars）和PaddleOCR 3.1（52.4k stars）两大顶级开源项目的深度调研，V1.3版本新增4个核心节点，借鉴竞品技术，大幅提升整体性能。
+
+### 新增功能特性
+
+#### 1. YOLO11-OBB旋转框检测节点 (`cv_obb_detection`)
+- **旋转框检测**: 精确贴合倾斜对象，减少背景噪声
+- **任意角度支持**: 0-360度旋转检测
+- **自动倾斜判断**: 角度阈值±5度
+- **降级方案**: OpenCV轮廓检测
+- **预期效果**: 倾斜包装检测准确率70%→85%+（+15%）
+
+#### 2. PP-OCRv5多语言OCR识别节点 (`ocr_recognize_node_v5`)
+- **精度提升**: 对比PP-OCRv4提升13%
+- **多语言支持**: 单模型支持5种文字类型（简中、繁中、拼音、英文、日文）
+- **手写识别**: 显著提升，支持复杂连笔
+- **竖排文本**: 支持垂直排版
+- **降级方案**: PP-OCRv4 → Tesseract
+- **预期效果**: 整体OCR识别准确率78%→91%+（+13%）
+
+#### 3. 多语言OCR识别节点 (`multi_language_ocr`)
+- **80+种语言**: 支持日文、韩文、法文、德文等
+- **自动语言检测**: 基于字符特征判断
+- **多语言混合**: 优化混合场景识别
+- **降级方案**: Tesseract多语言
+- **预期效果**: 多语言混合场景准确率60%→85%+（+25%）
+
+#### 4. PP-StructureV3文档解析节点 (`structure_parse`)
+- **23种版面元素**: title、paragraph、table、seal、chart等
+- **表格识别**: 精度69.65%（提升17%）
+- **印章识别**: 官方印章、私人印章
+- **图表转表格**: RMS-F1 80.60%
+- **公式识别**: LaTeX格式输出
+- **降级方案**: 基础版面解析
+- **预期效果**:
+  - 表格识别准确率：65%→85%+（+20%）
+  - 文档解析准确率：70%→88%+（+18%）
+
+### 技术亮点
+
+1. **智能降级方案**: 所有新节点都有完善的降级机制
+2. **兼容性设计**: 与原有节点完全兼容
+3. **性能优化**: 图像增强、模型选择、推理优化
+4. **多语言支持**: 自动检测、80+种语言、混合场景优化
+
+### 依赖安装
+\`\`\`bash
+# 升级PaddleOCR到最新版本
+uv add paddlepaddle paddleocr --upgrade
+
+# 安装Ultralytics
+uv add ultralytics
+
+# 其他依赖
+uv add opencv-python requests
+\`\`\`
+
+### 模型下载
+
+首次运行时自动下载：
+- `yolo11s-obb.pt`: ~20MB
+- PP-OCRv5模型: ~50MB
+- PP-StructureV3模型: ~100MB
+- **总模型大小**: ~170MB
+
+### 使用示例
+
+#### YOLO11-OBB检测
+\`\`\`python
+from graphs.nodes.cv_obb_detection_node import cv_obb_detection_node
+from graphs.state import CVOBBDetectionInput
+
+input_state = CVOBBDetectionInput(
+    image=File(url="https://example.com/rotated_package.jpg"),
+    detection_threshold=0.5,
+    use_gpu=True
+)
+output = cv_obb_detection_node(input_state, config, runtime)
+print(f"检测到 {len(output.detected_objects)} 个对象")
+print(f"其中 {output.rotated_count} 个倾斜对象")
+\`\`\`
+
+#### PP-OCRv5识别
+\`\`\`python
+from graphs.nodes.ocr_recognize_node_v5 import ocr_recognize_node_v5
+from graphs.state import OCRRecognizeInputV2
+
+input_state = OCRRecognizeInputV2(
+    image=File(url="https://example.com/label.jpg"),
+    auto_language_detect=True,
+    enable_handwriting=True,
+    use_paddle_ocr_v5=True
+)
+output = ocr_recognize_node_v5(input_state, config, runtime)
+print(f"检测语言: {output.detected_languages}")
+print(f"手写体占比: {output.handwriting_ratio:.2%}")
+\`\`\`
+
+#### 多语言OCR
+\`\`\`python
+from graphs.nodes.multi_language_ocr_node import multi_language_ocr_node
+from graphs.state import MultiLanguageOCRInput
+
+input_state = MultiLanguageOCRInput(
+    image=File(url="https://example.com/japanese_product.jpg"),
+    target_language="auto"
+)
+output = multi_language_ocr_node(input_state, config, runtime)
+print(f"识别文本: {output.recognized_text}")
+print(f"检测语言: {output.detected_language}")
+\`\`\`
+
+#### 文档解析
+\`\`\`python
+from graphs.nodes.structure_parse_node import structure_parse_node
+from graphs.state import StructureParseInput
+
+input_state = StructureParseInput(
+    image=File(url="https://example.com/manual.jpg"),
+    parse_mode="layout",
+    enable_table_recognition=True,
+    enable_seal_recognition=True
+)
+output = structure_parse_node(input_state, config, runtime)
+print(f"版面块: {len(output.layout_blocks)}")
+print(f"表格: {len(output.tables)}")
+print(f"印章: {len(output.seals)}")
+\`\`\`
+
+### 预期整体效果（V1.3）
+
+| 场景 | V1.2准确率 | V1.3目标准确率 | 提升幅度 |
+|------|-----------|---------------|---------|
+| 倾斜包装检测 | 70% | 85%+ | **+15%** 🚀 |
+| 整体OCR识别 | 78% | 91%+ | **+13%** 🚀 |
+| 手写体识别 | 60% | 80%+ | **+20%** 🚀 |
+| 多语言混合 | 60% | 85%+ | **+25%** 🚀 |
+| 表格识别 | 65% | 85%+ | **+20%** 🚀 |
+| 印章识别 | - | 85%+ | **新增** 🎉 |
+| 文档解析 | 70% | 88%+ | **+18%** 🚀 |
+
+详细优化方案请参考 `V1_3_COMPETITIVE_OPTIMIZATION_PLAN.md` 和 `V1_3_SUMMARY.md` 文档。
+

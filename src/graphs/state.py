@@ -642,4 +642,146 @@ class FineGrainedRecognitionOutput(BaseModel):
     recognition_confidence: float = Field(default=0.0, description="整体识别置信度")
     processing_time: float = Field(default=0.0, description="处理耗时（秒）")
 
+
+# ==================== V1.3 新增节点状态定义 ====================
+
+# --- YOLO11-OBB旋转框检测节点（V1.3新增）---
+
+class CVOBBDetectionInput(BaseModel):
+    """YOLO11-OBB旋转框检测节点输入"""
+    image: File = Field(..., description="待检测图片")
+    detection_threshold: float = Field(default=0.5, description="检测置信度阈值")
+    use_gpu: bool = Field(default=True, description="是否使用GPU加速")
+    enable_image_enhancement: bool = Field(default=True, description="是否启用图像增强")
+
+
+class CVOBBDetectionOutput(BaseModel):
+    """YOLO11-OBB旋转框检测节点输出"""
+    detected_objects: List[Dict[str, Any]] = Field(default_factory=list, description="检测到的对象列表")
+    """对象结构：
+    {
+        "bbox": [cx, cy, w, h, angle],  # 旋转框（中心点坐标、宽高、角度）
+        "polygon": [[x1,y1], [x2,y2], [x3,y3], [x4,y4]],  # 四个角点坐标
+        "confidence": 0.95,
+        "class_id": 0,
+        "class_name": "bottle",
+        "is_rotated": True,  # 是否为倾斜对象
+        "rotation_angle": 45.5  # 旋转角度
+    }
+    """
+    detection_confidence: float = Field(default=0.0, description="整体检测置信度")
+    rotated_count: int = Field(default=0, description="倾斜对象数量")
+    processing_time: float = Field(default=0.0, description="处理耗时（秒）")
+
+
+# --- PP-OCRv5多语言OCR识别节点（V1.3新增）---
+
+class OCRRecognizeInputV2(BaseModel):
+    """OCR识别节点输入（V2升级版）"""
+    image: Optional[File] = Field(default=None, description="待识别图片")
+    preprocessed_image: Optional[File] = Field(default=None, description="预处理后的图片（兼容字段）")
+    package_image: Optional[File] = Field(default=None, description="包装图片（兼容字段）")
+    # 新增参数
+    auto_language_detect: bool = Field(default=True, description="自动检测语言类型")
+    supported_languages: List[str] = Field(default_factory=list, description="支持的语言列表，如['ch', 'en', 'japan']")
+    enable_handwriting: bool = Field(default=True, description="是否启用手写识别")
+    enable_vertical_text: bool = Field(default=True, description="是否支持竖排文本")
+    use_paddle_ocr_v5: bool = Field(default=True, description="是否使用PP-OCRv5模型")
+    # 原有参数
+    ocr_engine_type: Literal["builtin", "api", "tesseract"] = Field(default="builtin", description="OCR引擎类型")
+    ocr_api_config: Optional[Dict[str, Any]] = Field(default=None, description="OCR API配置")
+
+
+class OCRRecognizeOutputV2(BaseModel):
+    """OCR识别节点输出（V2升级版）"""
+    ocr_raw_result: str = Field(default="", description="识别的原始文本")
+    raw_text: str = Field(default="", description="识别的原始文本（兼容字段）")
+    ocr_confidence: float = Field(default=0.0, description="整体置信度")
+    confidence: float = Field(default=0.0, description="整体置信度（兼容字段）")
+    ocr_regions: List[Dict[str, Any]] = Field(default_factory=list, description="识别区域列表")
+    regions: List[Dict[str, Any]] = Field(default_factory=list, description="识别区域列表（兼容字段）")
+    """区域结构：
+    {
+        "text": "识别文本",
+        "text_region": [[x1,y1], [x2,y2], [x3,y3], [x4,y4]],  # 多边形坐标
+        "confidence": 0.95,
+        "language": "ch",  # 检测到的语言类型
+        "is_handwriting": False,  # 是否为手写体
+        "is_vertical": False  # 是否为竖排文本
+    }
+    """
+    # 新增字段
+    detected_languages: List[str] = Field(default_factory=list, description="检测到的语言类型列表")
+    handwriting_ratio: float = Field(default=0.0, description="手写体占比")
+    engine_used: str = Field(default="", description="使用的引擎名称和版本")
+    processing_time: float = Field(default=0.0, description="处理耗时（秒）")
+
+
+# --- 多语言OCR识别节点（V1.3新增）---
+
+class MultiLanguageOCRInput(BaseModel):
+    """多语言OCR输入"""
+    image: File = Field(..., description="待识别图片")
+    target_language: Literal["ch", "en", "japan", "korean", "french", "german", "spanish", "italian", "portuguese", "auto"] = Field(
+        default="auto", description="目标语言，auto表示自动检测"
+    )
+    auto_detect_language: bool = Field(default=True, description="是否自动检测语言")
+
+
+class MultiLanguageOCROutput(BaseModel):
+    """多语言OCR输出"""
+    recognized_text: str = Field(default="", description="识别的文本")
+    detected_language: str = Field(default="", description="检测到的语言类型")
+    confidence: float = Field(default=0.0, description="识别置信度")
+    regions: List[Dict[str, Any]] = Field(default_factory=list, description="识别区域列表")
+    processing_time: float = Field(default=0.0, description="处理耗时（秒）")
+
+
+# --- PP-StructureV3文档解析节点（V1.3新增）---
+
+class StructureParseInput(BaseModel):
+    """文档解析节点输入"""
+    image: File = Field(..., description="待解析文档图片")
+    parse_mode: Literal["layout", "table", "seal", "formula", "chart"] = Field(default="layout", description="解析模式")
+    export_format: Literal["markdown", "json", "html"] = Field(default="markdown", description="输出格式")
+    enable_table_recognition: bool = Field(default=True, description="是否启用表格识别")
+    enable_seal_recognition: bool = Field(default=True, description="是否启用印章识别")
+
+
+class StructureParseOutput(BaseModel):
+    """文档解析节点输出"""
+    layout_blocks: List[Dict[str, Any]] = Field(default_factory=list, description="版面块列表")
+    """版面块结构：
+    {
+        "type": "text" | "table" | "seal" | "formula" | "chart" | "image",
+        "bbox": [x1, y1, x2, y2],
+        "content": "文本内容或表格HTML",
+        "confidence": 0.95,
+        "category": "title" | "paragraph" | "table" | "figure"  # 23种版面类别之一
+    }
+    """
+    tables: List[Dict[str, Any]] = Field(default_factory=list, description="提取的表格列表")
+    """表格结构：
+    {
+        "bbox": [x1, y1, x2, y2],
+        "html": "<table>...</table>",  # 表格HTML
+        "cells": [...],  # 单元格列表
+        "confidence": 0.92
+    }
+    """
+    seals: List[Dict[str, Any]] = Field(default_factory=list, description="提取的印章列表")
+    """印章结构：
+    {
+        "bbox": [x1, y1, x2, y2],
+        "text": "印章文字",
+        "type": "official" | "private",
+        "confidence": 0.88
+    }
+    """
+    charts: List[Dict[str, Any]] = Field(default_factory=list, description="提取的图表列表")
+    formulas: List[Dict[str, Any]] = Field(default_factory=list, description="提取的公式列表")
+    markdown: str = Field(default="", description="Markdown格式输出")
+    json_output: Dict[str, Any] = Field(default_factory=dict, description="JSON格式输出")
+    processing_time: float = Field(default=0.0, description="处理耗时（秒）")
+
     error_message: Optional[str] = Field(default=None, description="错误信息")
