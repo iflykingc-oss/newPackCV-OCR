@@ -6,16 +6,50 @@ CV目标检测节点
 
 import os
 import traceback
+import tempfile
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from coze_coding_utils.runtime_ctx.context import Context
+from coze_coding_dev_sdk.s3 import S3SyncStorage
+
+import cv2
+import numpy as np
+import requests
 
 from graphs.state import (
     CVDetectionInput,
     CVDetectionOutput
 )
+from utils.file.file import File
+
+
+def _upload_image_to_storage(image_array: np.ndarray, file_name: str) -> str:
+    """上传图片到对象存储，返回签名URL"""
+    try:
+        is_success, buffer = cv2.imencode('.jpg', image_array, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        if not is_success:
+            raise Exception("图片编码失败")
+
+        storage = S3SyncStorage(
+            endpoint_url=os.getenv("COZE_BUCKET_ENDPOINT_URL"),
+            access_key="",
+            secret_key="",
+            bucket_name=os.getenv("COZE_BUCKET_NAME"),
+            region="cn-beijing",
+        )
+        image_bytes = buffer.tobytes()
+        key = storage.upload_file(
+            file_content=image_bytes,
+            file_name=file_name,
+            content_type='image/jpeg'
+        )
+        url = storage.generate_presigned_url(key=key, expire_time=86400)
+        return url
+    except Exception as e:
+        print(f"[CV检测] 上传图片失败: {e}")
+        raise
 
 
 def cv_detection_node(state: CVDetectionInput, config: RunnableConfig, runtime: Runtime[Context]) -> CVDetectionOutput:
@@ -28,13 +62,6 @@ def cv_detection_node(state: CVDetectionInput, config: RunnableConfig, runtime: 
     print(f"[CV检测] 开始处理货架图片...")
     
     try:
-        # 导入依赖
-        import cv2
-        import numpy as np
-        import requests
-        import tempfile
-        from coze_coding_dev_sdk.s3 import S3SyncStorage
-        
         # 下载图片
         print(f"[CV检测] 下载图片: {state.shelf_image.url}")
         img_data = download_image(state.shelf_image.url)
@@ -66,10 +93,10 @@ def cv_detection_node(state: CVDetectionInput, config: RunnableConfig, runtime: 
         # 生成标注图片（可选）
         processed_image = None
         if detected_objects:
-            processed_image = draw_detection_boxes(image.copy(), detected_objects)
-            
-            # 保存标注图片
-            processed_image = save_processed_image(processed_image)
+            annotated_img = draw_detection_boxes(image.copy(), detected_objects)
+            file_name = f"cv/detection_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+            url = _upload_image_to_storage(annotated_img, file_name)
+            processed_image = File(url=url)
         
         print(f"[CV检测] 检测完成，共 {total_count} 个商品，耗时 {detection_time:.2f} 秒")
         
@@ -106,26 +133,28 @@ def download_image(image_url: str) -> Optional[bytes]:
         return None
 
 
-def enhance_image(image):
+def enhance_image(image: np.ndarray) -> np.ndarray:
     """图像增强：去噪、增强对比度、校正"""
-    import cv2
-    
-    # 去噪
-    denoised = cv2.fastNlMeansDenoisingColored(image, None, 10, 10, 7, 21)
-    
-    # CLAHE增强对比度
-    lab = cv2.cvtColor(denoised, cv2.COLOR_BGR2LAB)
-    l, a, b = cv2.split(lab)
-    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-    l = clahe.apply(l)
-    enhanced = cv2.merge([l, a, b])
-    enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
-    
-    # 锐化
-    kernel = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]])
-    sharpened = cv2.filter2D(enhanced, -1, kernel)
-    
-    return sharpened
+    try:
+        # 去噪
+        denoised = cv2.fastNlMeansDenoisingColored(image, None, 10, 10, 7, 21)
+        
+        # CLAHE增强对比度
+        lab = cv2.cvtColor(denoised, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        l = clahe.apply(l)
+        enhanced = cv2.merge([l, a, b])
+        enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
+        
+        # 锐化
+        kernel = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]])
+        sharpened = cv2.filter2D(enhanced, -1, kernel)
+        
+        return sharpened
+    except Exception as e:
+        print(f"[CV检测] 图像增强失败，使用原图: {str(e)}")
+        return image
 
 
 def detect_with_yolov8(image: np.ndarray, threshold: float) -> List[Dict[str, Any]]:
@@ -133,9 +162,8 @@ def detect_with_yolov8(image: np.ndarray, threshold: float) -> List[Dict[str, An
     try:
         from ultralytics import YOLO
         
-        # 加载YOLOv8模型（使用预训练模型）
-        # 注意：首次运行会自动下载模型
-        model = YOLO('yolov8n.pt')  # 使用nano版本，速度快
+        # 加载YOLOv8模型
+        model = YOLO('yolov8n.pt')
         
         # 进行预测
         results = model(image, conf=threshold)
@@ -145,7 +173,6 @@ def detect_with_yolov8(image: np.ndarray, threshold: float) -> List[Dict[str, An
         for result in results:
             boxes = result.boxes
             for i, box in enumerate(boxes):
-                # 获取边界框坐标
                 x1, y1, x2, y2 = box.xyxy[0].cpu().numpy()
                 confidence = box.conf[0].cpu().numpy()
                 class_id = int(box.cls[0].cpu().numpy())
@@ -163,50 +190,44 @@ def detect_with_yolov8(image: np.ndarray, threshold: float) -> List[Dict[str, An
         return detected_objects
         
     except ImportError:
-        print("警告: ultralytics未安装，使用模拟检测结果")
-        # 返回模拟数据（用于测试）
+        print("警告: ultralytics未安装，使用OpenCV轮廓检测作为降级方案")
         h, w = image.shape[:2]
-        return simulate_detection(h, w)
+        return _opencv_fallback_detection(image, h, w)
     except Exception as e:
-        print(f"YOLOv8检测失败: {str(e)}，使用模拟检测结果")
+        print(f"YOLOv8检测失败: {str(e)}，使用OpenCV轮廓检测作为降级方案")
         h, w = image.shape[:2]
-        return simulate_detection(h, w)
+        return _opencv_fallback_detection(image, h, w)
 
 
-def simulate_detection(h: int, w: int) -> List[Dict[str, Any]]:
-    """模拟检测结果（当YOLOv8不可用时）"""
-    import random
-    
-    # 模拟5-10个商品
-    count = random.randint(5, 10)
-    detected_objects = []
-    
-    for i in range(count):
-        # 随机生成边界框
-        x1 = random.randint(50, w // 2)
-        y1 = random.randint(50, h // 2)
-        box_w = random.randint(100, 200)
-        box_h = random.randint(150, 300)
-        x2 = x1 + box_w
-        y2 = y1 + box_h
+def _opencv_fallback_detection(image: np.ndarray, h: int, w: int) -> List[Dict[str, Any]]:
+    """OpenCV降级方案：使用轮廓检测"""
+    try:
+        gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
+        _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+        contours, _ = cv2.findContours(binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
         
-        detected_objects.append({
-            'id': i,
-            'bbox': [x1, y1, x2, y2],
-            'confidence': random.uniform(0.7, 0.95),
-            'class_name': 'bottle',
-            'class_id': 0,
-            'center': [(x1 + x2) // 2, (y1 + y2) // 2]
-        })
-    
-    return detected_objects
+        detected_objects = []
+        for i, contour in enumerate(contours):
+            area = cv2.contourArea(contour)
+            if area < 1000:
+                continue
+            x, y, bw, bh = cv2.boundingRect(contour)
+            detected_objects.append({
+                'id': i,
+                'bbox': [x, y, x + bw, y + bh],
+                'confidence': 0.75,
+                'class_name': 'package',
+                'class_id': 0,
+                'center': [x + bw // 2, y + bh // 2]
+            })
+        return detected_objects
+    except Exception as e:
+        print(f"[CV检测] OpenCV轮廓检测失败: {e}")
+        return []
 
 
 def draw_detection_boxes(image: np.ndarray, detected_objects: List[Dict[str, Any]]) -> np.ndarray:
     """在图片上绘制检测框"""
-    import cv2
-    import random
-    
     colors = [
         (255, 0, 0), (0, 255, 0), (0, 0, 255),
         (255, 255, 0), (255, 0, 255), (0, 255, 255)
@@ -218,13 +239,9 @@ def draw_detection_boxes(image: np.ndarray, detected_objects: List[Dict[str, Any
         confidence = obj['confidence']
         class_name = obj['class_name']
         
-        # 选择颜色
         color = colors[obj['id'] % len(colors)]
-        
-        # 绘制矩形
         cv2.rectangle(image, (x1, y1), (x2, y2), color, 2)
         
-        # 绘制标签
         label = f"{class_name} {confidence:.2f}"
         label_size, _ = cv2.getTextSize(label, cv2.FONT_HERSHEY_SIMPLEX, 0.5, 2)
         cv2.rectangle(image, (x1, y1 - label_size[1] - 10), 
@@ -233,33 +250,3 @@ def draw_detection_boxes(image: np.ndarray, detected_objects: List[Dict[str, Any
                    cv2.FONT_HERSHEY_SIMPLEX, 0.5, (255, 255, 255), 2)
     
     return image
-
-
-def save_processed_image(image: np.ndarray) -> str:
-    """保存处理后的图片"""
-    try:
-        import tempfile
-        from coze_coding_dev_sdk.s3 import S3SyncStorage
-        
-        # 保存到临时文件
-        with tempfile.NamedTemporaryFile(mode='wb', suffix='.jpg', delete=False) as f:
-            temp_path = f.name
-            cv2.imwrite(temp_path, image)
-        
-        # 上传到对象存储
-        storage = S3SyncStorage()
-        timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        object_name = f"cv/detection_{timestamp}.jpg"
-        url = storage.upload_file(temp_path, object_name)
-        
-        # 删除临时文件
-        try:
-            os.unlink(temp_path)
-        except:
-            pass
-        
-        return url
-        
-    except Exception as e:
-        print(f"保存处理图片失败: {str(e)}")
-        return None

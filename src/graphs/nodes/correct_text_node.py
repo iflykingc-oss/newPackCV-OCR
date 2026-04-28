@@ -5,6 +5,7 @@
 """
 
 import os
+import re
 import json
 import time
 from jinja2 import Template
@@ -75,7 +76,6 @@ def correct_text_node(
         changes = []
         
         try:
-            import re
             json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
             if json_match:
                 result = json.loads(json_match.group())

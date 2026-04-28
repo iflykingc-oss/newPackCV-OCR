@@ -5,14 +5,20 @@
 """
 
 import os
+import re
 import traceback
-import tempfile
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from coze_coding_utils.runtime_ctx.context import Context
-from utils.file.file import FileOps
+from coze_coding_dev_sdk.s3 import S3SyncStorage
+
+import cv2
+import numpy as np
+import requests
+
+from utils.file.file import File, FileOps
 
 from graphs.state import (
     SmartROIExtractInput,
@@ -20,9 +26,8 @@ from graphs.state import (
 )
 
 
-def download_image(url: str) -> Optional[bytes]:
+def _download_image(url: str) -> Optional[bytes]:
     """下载图片"""
-    import requests
     try:
         response = requests.get(url, timeout=30)
         if response.status_code == 200:
@@ -32,35 +37,28 @@ def download_image(url: str) -> Optional[bytes]:
     return None
 
 
-def upload_image_to_storage(image_array, file_name: str) -> str:
-    """上传图片到对象存储"""
-    import cv2
-    import numpy as np
-    from coze_coding_dev_sdk.s3 import S3SyncStorage
-    from io import BytesIO
-
+def _upload_image_to_storage(image_array: np.ndarray, file_name: str) -> str:
+    """上传图片到对象存储，返回签名URL"""
     try:
-        # 编码图片
         is_success, buffer = cv2.imencode('.jpg', image_array, [cv2.IMWRITE_JPEG_QUALITY, 95])
         if not is_success:
             raise Exception("图片编码失败")
 
-        # 上传到对象存储
-        s3_storage = S3SyncStorage()
+        storage = S3SyncStorage(
+            endpoint_url=os.getenv("COZE_BUCKET_ENDPOINT_URL"),
+            access_key="",
+            secret_key="",
+            bucket_name=os.getenv("COZE_BUCKET_NAME"),
+            region="cn-beijing",
+        )
         image_bytes = buffer.tobytes()
-        upload_path = f"roi_extracted/{file_name}"
-
-        # 使用 BytesIO 包装
-        file_like = BytesIO(image_bytes)
-        file_like.seek(0)
-
-        result_url = s3_storage.upload_fileobj(
-            fileobj=file_like,
-            key=upload_path,
+        key = storage.upload_file(
+            file_content=image_bytes,
+            file_name=file_name,
             content_type='image/jpeg'
         )
-
-        return result_url
+        url = storage.generate_presigned_url(key=key, expire_time=86400)
+        return url
     except Exception as e:
         print(f"[智能ROI切割] 上传图片失败: {e}")
         raise
@@ -68,31 +66,19 @@ def upload_image_to_storage(image_array, file_name: str) -> str:
 
 def classify_field(text: str) -> str:
     """分类字段类型"""
-    import re
-
     text_lower = text.lower()
 
-    # 生产日期
     if re.search(r"生产日期|生产:|日期:", text_lower):
         return "production_date"
-
-    # 有效期
     if re.search(r"有效期|保质期|效期至|到期", text_lower):
         return "expiry_date"
-
-    # 批号
     if re.search(r"批号|batch|lot", text_lower):
         return "batch_number"
-
-    # 规格
     if re.search(r"规格|含量|净含量|ml|g|kg", text_lower):
         return "specification"
-
-    # 条形码
     if re.match(r"^\d{8,13}$", text):
         return "barcode"
 
-    # 品牌
     brand_keywords = ["农夫山泉", "可口可乐", "百事", "雪碧", "康师傅", "统一", "王老吉", "加多宝"]
     if any(keyword in text for keyword in brand_keywords):
         return "brand"
@@ -108,7 +94,7 @@ def smart_roi_extract_node(
     """
     title: 智能ROI切割与增强
     desc: 检测关键信息区域，裁切并增强，二次OCR识别，提升识别准确率30%+
-    integrations: PaddleOCR, OpenCV DNN
+    integrations: PaddleOCR, OpenCV
     """
     ctx = runtime.context
 
@@ -117,14 +103,11 @@ def smart_roi_extract_node(
     print(f"[智能ROI切割] 配置: SR增强={state.enable_sr_enhance}, 放大倍数={state.sr_scale_factor}x, ROI边距={state.roi_padding}")
 
     try:
-        import cv2
-        import numpy as np
-
         start_time = datetime.now()
 
         # 下载图片
         print(f"[智能ROI切割] 下载图片: {state.image.url}")
-        img_data = download_image(state.image.url)
+        img_data = _download_image(state.image.url)
         if img_data is None:
             raise Exception("图片下载失败")
 
@@ -172,11 +155,8 @@ def smart_roi_extract_node(
                 text = item[1][0]
                 confidence = item[1][1] if len(item[1]) > 1 else 0.0
 
-                # 判断是否为目标字段
                 field_type = classify_field(text)
 
-                # 如果未指定目标字段，则提取所有字段
-                # 如果指定了目标字段，只提取目标字段
                 if state.target_fields and field_type not in state.target_fields and field_type != "other":
                     continue
 
@@ -208,7 +188,6 @@ def smart_roi_extract_node(
                 }
                 roi_regions.append(roi_region)
 
-                # 按字段分类
                 if field_type not in field_classification:
                     field_classification[field_type] = []
                 field_classification[field_type].append(roi_region)
@@ -216,22 +195,20 @@ def smart_roi_extract_node(
                 # 超分辨率增强
                 if state.enable_sr_enhance:
                     try:
-                        # 使用双线性插值放大（快速方案）
                         new_size = (
                             int(roi.shape[1] * state.sr_scale_factor),
                             int(roi.shape[0] * state.sr_scale_factor)
                         )
                         enhanced_roi = cv2.resize(roi, new_size, interpolation=cv2.INTER_CUBIC)
 
-                        # 锐化
                         kernel_sharpen = np.array([[-1, -1, -1],
                                                    [-1, 9, -1],
                                                    [-1, -1, -1]])
                         enhanced_roi = cv2.filter2D(enhanced_roi, -1, kernel_sharpen)
 
                         # 上传增强后的ROI
-                        roi_file_name = f"roi_{field_type}_{idx}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
-                        roi_url = upload_image_to_storage(enhanced_roi, roi_file_name)
+                        roi_file_name = f"roi_extracted/roi_{field_type}_{idx}_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+                        roi_url = _upload_image_to_storage(enhanced_roi, roi_file_name)
                         enhanced_rois.append(File(url=roi_url))
 
                         # 二次OCR
@@ -248,7 +225,7 @@ def smart_roi_extract_node(
                                 "enhanced_confidence": enhanced_confidence
                             })
 
-                            print(f"[智能ROI切割] ROI #{idx} [{field_type}]: '{text}' → '{enhanced_text}'")
+                            print(f"[智能ROI切割] ROI #{idx} [{field_type}]: '{text}' -> '{enhanced_text}'")
                         else:
                             extracted_texts.append({
                                 "field": field_type,

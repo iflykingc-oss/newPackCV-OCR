@@ -5,6 +5,7 @@
 """
 
 import os
+import re
 import json
 import time
 from jinja2 import Template
@@ -80,7 +81,6 @@ def model_extract_node(
         
         try:
             # 提取JSON部分
-            import re
             json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
             if json_match:
                 structured_data = json.loads(json_match.group())

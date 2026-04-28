@@ -44,6 +44,8 @@ class GlobalState(BaseModel):
     # 中间状态（单图处理）
     preprocessed_image: Optional[File] = Field(default=None, description="预处理后的图片")
     ocr_raw_result: Optional[str] = Field(default="", description="OCR识别的原始文本")
+    ocr_result: Optional[str] = Field(default="", description="OCR识别结果（兼容字段）")
+    raw_text: Optional[str] = Field(default="", description="OCR识别结果（兼容字段）")
     ocr_confidence: Optional[float] = Field(default=0.0, description="OCR识别置信度")
     ocr_regions: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="OCR识别区域列表（坐标+文本）")
     structured_data: Optional[Dict[str, Any]] = Field(default_factory=dict, description="模型结构化提取的数据")
@@ -52,6 +54,7 @@ class GlobalState(BaseModel):
     
     # 中间状态（PackCV-OCR）
     detected_objects: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="CV检测到的商品列表")
+    obb_results: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="OBB旋转框检测结果列表")
     detection_confidence: Optional[float] = Field(default=0.0, description="CV检测整体置信度")
     roi_regions: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="裁切后的ROI区域列表")
     roi_images: Optional[List[File]] = Field(default_factory=list, description="裁切后的ROI图片列表")
@@ -650,14 +653,16 @@ class FineGrainedRecognitionOutput(BaseModel):
 class CVOBBDetectionInput(BaseModel):
     """YOLO11-OBB旋转框检测节点输入"""
     image: File = Field(..., description="待检测图片")
-    detection_threshold: float = Field(default=0.5, description="检测置信度阈值")
+    confidence_threshold: float = Field(default=0.5, description="检测置信度阈值")
+    iou_threshold: float = Field(default=0.45, description="IOU阈值（NMS）")
+    detection_threshold: float = Field(default=0.5, description="检测置信度阈值（兼容字段）")
     use_gpu: bool = Field(default=True, description="是否使用GPU加速")
     enable_image_enhancement: bool = Field(default=True, description="是否启用图像增强")
 
 
 class CVOBBDetectionOutput(BaseModel):
     """YOLO11-OBB旋转框检测节点输出"""
-    detected_objects: List[Dict[str, Any]] = Field(default_factory=list, description="检测到的对象列表")
+    obb_results: List[Dict[str, Any]] = Field(default_factory=list, description="旋转框检测结果列表")
     """对象结构：
     {
         "bbox": [cx, cy, w, h, angle],  # 旋转框（中心点坐标、宽高、角度）
@@ -669,6 +674,8 @@ class CVOBBDetectionOutput(BaseModel):
         "rotation_angle": 45.5  # 旋转角度
     }
     """
+    total_count: int = Field(default=0, description="检测到的对象总数")
+    processed_image: Optional[File] = Field(default=None, description="标注后的图片")
     detection_confidence: float = Field(default=0.0, description="整体检测置信度")
     rotated_count: int = Field(default=0, description="倾斜对象数量")
     processing_time: float = Field(default=0.0, description="处理耗时（秒）")

@@ -200,10 +200,10 @@ def perform_ocr_with_paddle_v5(
         
         # 初始化PaddleOCR（PP-OCRv5）
         ocr = PaddleOCR(
-            # 使用PP-OCRv5模型
-            use_angle_cls=enable_vertical_text,  # 文本方向分类
+            # 使用PP-OCRv4模型（v5暂不兼容当前PaddlePaddle版本）
+            use_angle_cls=enable_vertical_text,
             lang=lang,
-            use_gpu=False,  # 根据环境调整
+            use_gpu=False,
             show_log=False,
             
             # PP-OCRv5特定参数

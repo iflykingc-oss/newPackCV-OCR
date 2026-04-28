@@ -366,11 +366,16 @@ if output.validation_errors:
 
 ### 依赖安装
 ```bash
-# 基础依赖
-uv add opencv-python-headless paddlepaddle paddleocr numpy
+# 核心依赖（已安装）
+uv add opencv-python-headless paddlepaddle==2.6.2 paddleocr==2.9.1 numpy
+uv add coze-coding-dev-sdk langchain langchain-text-splitters
+uv add langgraph requests pandas reportlab ultralytics
+uv add beautifulsoup4 pillow
 
-# 超分辨率模型（可选，模型文件需手动下载到assets目录）
-# EDSR模型下载: https://github.com/Saafke/EDSR_Tensorflow/tree/master/models
+# 注意：
+# - PaddleOCR 3.x 与 PaddlePaddle 3.x 存在兼容性问题，建议使用 2.9.1 + 2.6.2 稳定组合
+# - opencv-python-headless 不含 dnn_superres，已使用 LANCZOS4+锐化 替代方案
+# - sklearn 已被纯 numpy 实现替代，无需安装 scikit-learn
 ```
 
 ### 模型文件准备（可选）
@@ -423,6 +428,73 @@ mkdir -p assets
 2. OCR识别
 3. 根据model_type选择模型处理路径
 4. 结果输出和导出
+
+---
+
+## V1.3.1 Bugfix & 全链路修复
+
+### 修复背景
+V1.3发布后测试发现OCR识别结果全部为空，经排查发现多个LSP错误、S3上传API不兼容、PaddleOCR版本兼容性等问题。
+
+### 修复内容
+
+#### 1. S3上传API统一修复
+- **问题**: 多个节点使用`S3SyncStorage().upload_fileobj()`和`.upload()`等不存在的方法
+- **修复**: 统一使用正确API: `upload_file(file_content, file_name, content_type)` + `generate_presigned_url(key, expire_time)`
+- **涉及文件**: `cv_detection_node.py`, `image_preprocess_enhance_node.py`, `smart_roi_extract_node.py`, `super_resolution_enhance_node.py`, `text_direction_correct_node.py`, `roi_segmentation_node.py`, `cv_obb_detection_node.py`, `image_preprocess_node.py`, `result_output_node.py`
+
+#### 2. 标准库导入修复
+- **问题**: 多个节点在函数内部使用`import`语句，违反工程规范
+- **修复**: 将所有`import`移到文件顶部（`cv2`, `numpy`, `requests`, `re`, `pandas`, `tempfile`, `File`, `S3SyncStorage`等）
+- **涉及文件**: `cv_detection_node.py`, `roi_segmentation_node.py`, `model_extract_node.py`, `correct_text_node.py`, `qa_answer_node.py`, `result_output_node.py`
+
+#### 3. PaddleOCR版本兼容性修复
+- **问题**: PaddleOCR 3.x API与PaddlePaddle 3.x存在兼容性问题（OneDNN PIR bug）
+- **修复**: 降级到PaddleOCR 2.9.1 + PaddlePaddle 2.6.2稳定组合，使用`use_angle_cls=True, show_log=False`参数
+- **涉及文件**: 所有使用PaddleOCR的8个节点文件
+
+#### 4. dnn_superres模块替代方案
+- **问题**: `opencv-python-headless`不包含`cv2.dnn_superres`模块
+- **修复**: 替换为`cv2.INTER_LANCZOS4`高质量插值+Unsharp Mask锐化方案
+- **涉及文件**: `super_resolution_enhance_node.py`
+
+#### 5. sklearn KMeans依赖消除
+- **问题**: `sklearn.cluster.KMeans`需要安装scikit-learn额外依赖
+- **修复**: 实现纯numpy的`SimpleKMeans`类替代sklearn
+- **涉及文件**: `layout_parse_node.py`
+
+#### 6. Mock数据消除
+- **问题**: 飞书/微信推送函数返回硬编码模拟结果，OpenCV降级使用随机数模拟检测结果
+- **修复**: 
+  - 飞书推送: 通过`coze_workload_identity.Client`获取凭证，调用Webhook API发送富文本消息
+  - 微信推送: 通过`coze_workload_identity.Client`获取凭证，调用企业微信Webhook API发送Markdown消息
+  - OpenCV降级: 移除随机Mock，轮廓检测失败时返回空列表
+- **涉及文件**: `result_output_node.py`, `cv_detection_node.py`
+
+#### 7. 主链路图片预处理修复
+- **问题**: `image_preprocess_node.py`将图片转为二值图（黑白色），PaddleOCR识别效果差；图片保存到本地`/tmp`路径而非S3
+- **修复**: 输出彩色的增强图像（CLAHE+去噪+锐化），上传到S3返回签名URL
+- **涉及文件**: `image_preprocess_node.py`
+
+#### 8. 数据流修复
+- **问题**: GlobalState缺少`raw_text`和`ocr_result`字段，导致OCR文本无法传递到下游节点
+- **修复**: 在GlobalState中添加`raw_text`和`ocr_result`字段
+- **涉及文件**: `state.py`
+
+### 验证结果
+- ✅ test_run通过，OCR识别正常输出文本
+- ✅ S3图片上传正常，返回签名URL
+- ✅ 飞书/微信推送调用真实API
+- ⚠️ LLM结构化提取因API配额不足暂时无法验证（计费问题，非代码问题）
+
+### 依赖版本
+```
+paddlepaddle==2.6.2
+paddleocr==2.9.1
+opencv-python-headless
+numpy
+coze-coding-dev-sdk
+```
 
 ---
 

@@ -5,6 +5,7 @@
 """
 
 import os
+import re
 import json
 import time
 from typing import Dict, Any, List
@@ -80,7 +81,6 @@ def qa_answer_node(
         # 提取参考来源（如果有）
         references = []
         if "参考" in answer or "来源" in answer:
-            import re
             ref_match = re.search(r'参考[:：](.+)', answer)
             if ref_match:
                 references.append(ref_match.group(1).strip())

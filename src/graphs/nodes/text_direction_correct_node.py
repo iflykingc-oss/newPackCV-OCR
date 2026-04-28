@@ -6,13 +6,18 @@
 
 import os
 import traceback
-import tempfile
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from coze_coding_utils.runtime_ctx.context import Context
-from utils.file.file import FileOps
+from coze_coding_dev_sdk.s3 import S3SyncStorage
+
+import cv2
+import numpy as np
+import requests
+
+from utils.file.file import File, FileOps
 
 from graphs.state import (
     TextDirectionCorrectInput,
@@ -20,9 +25,8 @@ from graphs.state import (
 )
 
 
-def download_image(url: str) -> Optional[bytes]:
+def _download_image(url: str) -> Optional[bytes]:
     """下载图片"""
-    import requests
     try:
         response = requests.get(url, timeout=30)
         if response.status_code == 200:
@@ -32,35 +36,28 @@ def download_image(url: str) -> Optional[bytes]:
     return None
 
 
-def upload_image_to_storage(image_array, file_name: str) -> str:
-    """上传图片到对象存储"""
-    import cv2
-    import numpy as np
-    from coze_coding_dev_sdk.s3 import S3SyncStorage
-    from io import BytesIO
-
+def _upload_image_to_storage(image_array: np.ndarray, file_name: str) -> str:
+    """上传图片到对象存储，返回签名URL"""
     try:
-        # 编码图片
         is_success, buffer = cv2.imencode('.jpg', image_array, [cv2.IMWRITE_JPEG_QUALITY, 95])
         if not is_success:
             raise Exception("图片编码失败")
 
-        # 上传到对象存储
-        s3_storage = S3SyncStorage()
+        storage = S3SyncStorage(
+            endpoint_url=os.getenv("COZE_BUCKET_ENDPOINT_URL"),
+            access_key="",
+            secret_key="",
+            bucket_name=os.getenv("COZE_BUCKET_NAME"),
+            region="cn-beijing",
+        )
         image_bytes = buffer.tobytes()
-        upload_path = f"corrected/{file_name}"
-
-        # 使用 BytesIO 包装
-        file_like = BytesIO(image_bytes)
-        file_like.seek(0)
-
-        result_url = s3_storage.upload_fileobj(
-            fileobj=file_like,
-            key=upload_path,
+        key = storage.upload_file(
+            file_content=image_bytes,
+            file_name=file_name,
             content_type='image/jpeg'
         )
-
-        return result_url
+        url = storage.generate_presigned_url(key=key, expire_time=86400)
+        return url
     except Exception as e:
         print(f"[文本方向矫正] 上传图片失败: {e}")
         raise
@@ -75,17 +72,14 @@ def text_direction_correct_node(state: TextDirectionCorrectInput, config: Runnab
     ctx = runtime.context
 
     print(f"[文本方向矫正] 开始处理图片...")
-    print(f"[文本方向矫正] 配置: 边缘投影法={state.use_edge_projection}, 分类模型={state.use_cls_model}, 角度范围=±{state.angle_range}度")
+    print(f"[文本方向矫正] 配置: 边缘投影法={state.use_edge_projection}, 分类模型={state.use_cls_model}, 角度范围=+-{state.angle_range}度")
 
     try:
-        import cv2
-        import numpy as np
-
         start_time = datetime.now()
 
         # 下载图片
         print(f"[文本方向矫正] 下载图片: {state.image.url}")
-        img_data = download_image(state.image.url)
+        img_data = _download_image(state.image.url)
         if img_data is None:
             raise Exception("图片下载失败")
 
@@ -107,25 +101,19 @@ def text_direction_correct_node(state: TextDirectionCorrectInput, config: Runnab
         if state.use_edge_projection:
             print(f"[文本方向矫正] 使用边缘投影法检测倾斜角度...")
             try:
-                # 转灰度
                 gray = cv2.cvtColor(image, cv2.COLOR_BGR2GRAY)
-
-                # 二值化
                 _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
 
-                # 搜索最佳角度
                 best_angle = 0
                 max_zero_count = 0
                 angles = range(-state.angle_range, state.angle_range + 1, 1)
 
                 for angle in angles:
-                    # 旋转图片
                     (h, w) = binary.shape[:2]
                     center = (w // 2, h // 2)
                     M = cv2.getRotationMatrix2D(center, angle, 1.0)
                     rotated = cv2.warpAffine(binary, M, (w, h))
 
-                    # 水平投影
                     horizontal_projection = np.sum(rotated, axis=1)
                     zero_count = np.sum(horizontal_projection == 0)
 
@@ -133,8 +121,7 @@ def text_direction_correct_node(state: TextDirectionCorrectInput, config: Runnab
                         max_zero_count = zero_count
                         best_angle = angle
 
-                # 矫正图片
-                if abs(best_angle) > 2:  # 角度大于2度才矫正
+                if abs(best_angle) > 2:
                     print(f"[文本方向矫正] 边缘投影法检测到倾斜角度: {best_angle} 度")
                     (h, w) = image.shape[:2]
                     center = (w // 2, h // 2)
@@ -143,7 +130,7 @@ def text_direction_correct_node(state: TextDirectionCorrectInput, config: Runnab
 
                     detected_angle = float(best_angle)
                     correction_method = "edge_projection"
-                    confidence = min(max_zero_count / (h * w), 1.0)  # 简化的置信度计算
+                    confidence = min(max_zero_count / (h * w), 1.0)
                 else:
                     print(f"[文本方向矫正] 检测角度过小（{best_angle}度），无需矫正")
             except Exception as e:
@@ -155,43 +142,29 @@ def text_direction_correct_node(state: TextDirectionCorrectInput, config: Runnab
             try:
                 from paddleocr import PaddleOCR
 
-                # 初始化OCR（启用角度分类）
                 ocr = PaddleOCR(use_angle_cls=True, lang='ch', show_log=False)
-
-                # 检测方向
                 result = ocr.ocr(image, cls=True)
 
                 if result and result[0]:
                     print(f"[文本方向矫正] OCR检测到 {len(result[0])} 个文本块")
 
-                    # PaddleOCR返回的角度信息可能在result中
-                    # 不同版本返回格式可能不同，这里做简化处理
-                    # 如果检测到大角度旋转，进行矫正
-                    # 注意：实际使用时需要根据PaddleOCR的返回格式解析角度
-
-                    # 这里使用简化逻辑：检测文本框的倾斜角度
                     boxes = [item[0] for item in result[0] if len(item) > 0]
 
                     if boxes:
-                        # 计算平均倾斜角度
-                        angles = []
+                        angle_list = []
                         for box in boxes:
-                            # 计算文本框的倾斜角度
-                            # 取左上角和右上角的点
                             if len(box) >= 2:
                                 p1 = box[0]
                                 p2 = box[1]
                                 dx = p2[0] - p1[0]
                                 dy = p2[1] - p1[1]
                                 angle = np.arctan2(dy, dx) * 180 / np.pi
-                                angles.append(angle)
+                                angle_list.append(angle)
 
-                        if angles:
-                            avg_angle = np.mean(angles)
+                        if angle_list:
+                            avg_angle = np.mean(angle_list)
 
-                            # 判断是否需要矫正（检测到明显的90度倍数旋转）
                             if abs(avg_angle) > 45:
-                                # 可能是90度旋转
                                 rotation = 90 * round(avg_angle / 90)
                                 if rotation != 0:
                                     print(f"[文本方向矫正] 检测到大角度旋转: {rotation} 度")
@@ -202,7 +175,7 @@ def text_direction_correct_node(state: TextDirectionCorrectInput, config: Runnab
 
                                     detected_angle = float(rotation)
                                     correction_method = "paddleocr_cls"
-                                    confidence = 0.85  # 假设置信度
+                                    confidence = 0.85
             except ImportError:
                 print(f"[文本方向矫正] PaddleOCR未安装，跳过角度分类")
             except Exception as e:
@@ -210,8 +183,8 @@ def text_direction_correct_node(state: TextDirectionCorrectInput, config: Runnab
 
         # 上传矫正后的图片
         print(f"[文本方向矫正] 上传矫正后的图片...")
-        file_name = f"corrected_{datetime.now().strftime('%Y%m%d_%H%M%S')}_angle{detected_angle:.1f}.jpg"
-        corrected_image_url = upload_image_to_storage(corrected_image, file_name)
+        file_name = f"corrected/corrected_{datetime.now().strftime('%Y%m%d_%H%M%S')}_angle{detected_angle:.1f}.jpg"
+        corrected_image_url = _upload_image_to_storage(corrected_image, file_name)
 
         processing_time = (datetime.now() - start_time).total_seconds()
 

@@ -6,12 +6,47 @@
 
 import os
 import time
+import traceback
+import requests
 from typing import Dict, Any
+from datetime import datetime
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from coze_coding_utils.runtime_ctx.context import Context
+from coze_coding_dev_sdk.s3 import S3SyncStorage
+
+import cv2
+import numpy as np
+
 from graphs.state import ImagePreprocessInput, ImagePreprocessOutput
 from utils.file.file import File, FileOps
+
+
+def _upload_image_to_storage(image_array: np.ndarray, file_name: str) -> str:
+    """上传图片到对象存储，返回签名URL"""
+    try:
+        is_success, buffer = cv2.imencode('.jpg', image_array, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        if not is_success:
+            raise Exception("图片编码失败")
+
+        storage = S3SyncStorage(
+            endpoint_url=os.getenv("COZE_BUCKET_ENDPOINT_URL"),
+            access_key="",
+            secret_key="",
+            bucket_name=os.getenv("COZE_BUCKET_NAME"),
+            region="cn-beijing",
+        )
+        image_bytes = buffer.tobytes()
+        key = storage.upload_file(
+            file_content=image_bytes,
+            file_name=file_name,
+            content_type='image/jpeg'
+        )
+        url = storage.generate_presigned_url(key=key, expire_time=86400)
+        return url
+    except Exception as e:
+        print(f"[图片预处理] 上传图片失败: {e}")
+        raise
 
 
 def image_preprocess_node(
@@ -22,41 +57,41 @@ def image_preprocess_node(
     """
     title: 图片预处理
     desc: 对包装图片进行增强、去噪、校正等预处理，提升OCR识别准确率
-    integrations: 图像处理
+    integrations: OpenCV
     """
     ctx = runtime.context
     
     # 获取图片路径
-    image_path = state.package_image.url
-    if not os.path.exists(image_path):
-        # 如果是URL，先下载到临时目录
-        import requests
-        temp_path = f"/tmp/preprocess_{int(time.time())}.jpg"
+    image_url = state.package_image.url
+    
+    # 如果是URL，先下载到临时目录
+    local_path = None
+    if image_url.startswith("http://") or image_url.startswith("https://"):
+        temp_path = f"/tmp/preprocess_input_{int(time.time())}.jpg"
         try:
-            resp = requests.get(image_path, timeout=30)
+            resp = requests.get(image_url, timeout=30)
             resp.raise_for_status()
             with open(temp_path, "wb") as f:
                 f.write(resp.content)
-            image_path = temp_path
+            local_path = temp_path
         except Exception as e:
-            # 下载失败，直接使用原路径
-            image_path = state.package_image.url
+            print(f"[图片预处理] 下载图片失败: {e}，使用原URL")
+            local_path = image_url
+    else:
+        local_path = image_url
     
     # 使用OpenCV进行图像预处理
     try:
-        import cv2
-        import numpy as np
-        
         # 读取图片
-        img = cv2.imread(image_path)
+        img = cv2.imread(local_path)
         if img is None:
-            raise Exception(f"无法读取图片: {image_path}")
+            raise Exception(f"无法读取图片: {local_path}")
         
         processing_info = {}
         is_rotated = False
         is_enhanced = False
         
-        # 1. 图像增强（提升对比度、亮度）
+        # 1. 图像增强（提升对比度、亮度）- 使用CLAHE
         lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
         l, a, b = cv2.split(lab)
         clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
@@ -75,34 +110,24 @@ def image_preprocess_node(
                                    [-1,  9, -1],
                                    [-1, -1, -1]])
         sharpened = cv2.filter2D(denoised, -1, kernel_sharpen)
+        processing_info["sharpened"] = True
         
-        # 4. 灰度化
-        gray = cv2.cvtColor(sharpened, cv2.COLOR_BGR2GRAY)
+        # 注意：不再将图像转为二值图，PaddleOCR等引擎需要彩色或灰度图
+        # 保存增强后的彩色图（而非二值图），以获得更好的OCR效果
+        processed_image = sharpened
         
-        # 5. 自适应阈值处理（Sauvola算法思想，适合弱信号识别）
-        binary = cv2.adaptiveThreshold(
-            gray, 255,
-            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY,
-            11, 2
-        )
-        
-        # 6. 形态学处理（消除小噪点）
-        kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
-        morph = cv2.morphologyEx(binary, cv2.MORPH_CLOSE, kernel)
-        
-        # 7. 保存预处理后的图片
-        output_path = f"/tmp/preprocessed_{int(time.time())}.jpg"
-        cv2.imwrite(output_path, morph)
+        # 上传到对象存储
+        file_name = f"preprocessed/preprocess_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
+        processed_url = _upload_image_to_storage(processed_image, file_name)
         
         # 创建File对象
-        processed_file = File(url=output_path, file_type="image")
+        processed_file = File(url=processed_url, file_type="image")
         
         processing_info["original_size"] = f"{img.shape[1]}x{img.shape[0]}"
-        processing_info["output_size"] = f"{morph.shape[1]}x{morph.shape[0]}"
-        processing_info["processing_steps"] = ["enhance", "denoise", "sharpen", "threshold", "morphology"]
+        processing_info["output_size"] = f"{processed_image.shape[1]}x{processed_image.shape[0]}"
+        processing_info["processing_steps"] = ["enhance", "denoise", "sharpen"]
         
-        print(f"图片预处理完成: {processing_info}")
+        print(f"[图片预处理] 完成: {processing_info}")
         
         return ImagePreprocessOutput(
             preprocessed_image=processed_file,
@@ -113,7 +138,8 @@ def image_preprocess_node(
         
     except Exception as e:
         # 如果OpenCV不可用或处理失败，返回原图
-        print(f"图像预处理失败，使用原图: {str(e)}")
+        print(f"[图片预处理] 失败，使用原图: {e}")
+        traceback.print_exc()
         return ImagePreprocessOutput(
             preprocessed_image=state.package_image,
             is_rotated=False,

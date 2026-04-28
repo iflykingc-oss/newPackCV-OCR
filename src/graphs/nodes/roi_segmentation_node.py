@@ -6,11 +6,17 @@ ROI分层裁切节点
 
 import os
 import traceback
+import tempfile
 from typing import Dict, Any, List, Optional
 from datetime import datetime
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from coze_coding_utils.runtime_ctx.context import Context
+from coze_coding_dev_sdk.s3 import S3SyncStorage
+
+import cv2
+import numpy as np
+import requests
 
 from graphs.state import (
     ROISegmentationInput,
@@ -28,13 +34,6 @@ def roi_segmentation_node(state: ROISegmentationInput, config: RunnableConfig, r
     print(f"[ROI裁切] 开始分割 {len(state.detected_objects)} 个商品区域...")
     
     try:
-        # 导入依赖
-        import cv2
-        import numpy as np
-        import requests
-        import tempfile
-        from coze_coding_dev_sdk.s3 import S3SyncStorage
-        
         start_time = datetime.now()
         
         # 下载原始图片
@@ -121,7 +120,6 @@ def roi_segmentation_node(state: ROISegmentationInput, config: RunnableConfig, r
 def download_image(image_url: str) -> Optional[bytes]:
     """下载图片"""
     try:
-        import requests
         response = requests.get(image_url, timeout=30)
         if response.status_code == 200:
             return response.content
@@ -132,30 +130,33 @@ def download_image(image_url: str) -> Optional[bytes]:
 
 
 def save_roi_image(roi: np.ndarray, idx: int, obj_id: int) -> str:
-    """保存ROI裁切图片"""
+    """保存ROI裁切图片到对象存储"""
     try:
-        import tempfile
-        from coze_coding_dev_sdk.s3 import S3SyncStorage
-        
-        # 保存到临时文件
-        with tempfile.NamedTemporaryFile(mode='wb', suffix='.jpg', delete=False) as f:
-            temp_path = f.name
-            cv2.imwrite(temp_path, roi)
-        
-        # 上传到对象存储
-        storage = S3SyncStorage()
+        storage = S3SyncStorage(
+            endpoint_url=os.getenv("COZE_BUCKET_ENDPOINT_URL"),
+            access_key="",
+            secret_key="",
+            bucket_name=os.getenv("COZE_BUCKET_NAME"),
+            region="cn-beijing",
+        )
+
+        # 编码图片
+        is_success, buffer = cv2.imencode('.jpg', roi, [cv2.IMWRITE_JPEG_QUALITY, 95])
+        if not is_success:
+            raise Exception("ROI图片编码失败")
+
+        image_bytes = buffer.tobytes()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
-        object_name = f"cv/roi_{timestamp}_id{obj_id}_{idx}.jpg"
-        url = storage.upload_file(temp_path, object_name)
-        
-        # 删除临时文件
-        try:
-            os.unlink(temp_path)
-        except:
-            pass
-        
+        file_name = f"cv/roi_{timestamp}_id{obj_id}_{idx}.jpg"
+
+        key = storage.upload_file(
+            file_content=image_bytes,
+            file_name=file_name,
+            content_type='image/jpeg'
+        )
+        url = storage.generate_presigned_url(key=key, expire_time=86400)
         return url
         
     except Exception as e:
         print(f"保存ROI图片失败: {str(e)}")
-        return None
+        return ""

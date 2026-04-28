@@ -127,18 +127,17 @@ def perform_structure_parse(
         }
     """
     try:
-        from paddleocr import PPStructureV3
+        from paddleocr import PPStructure
         
-        print(f"[文档解析] 使用PP-StructureV3解析")
+        print(f"[文档解析] 使用PP-Structure解析")
         
-        # 初始化PPStructureV3
-        structure = PPStructureV3(
-            use_doc_orientation_classify=True,  # 文档方向检测
+        # 初始化PPStructure
+        structure = PPStructure(
+            image_orientation=True,  # 文档方向检测
             layout=True,  # 版面解析
-            use_table_recognition=enable_table_recognition,  # 表格识别
-            use_seal_recognition=enable_seal_recognition,  # 印章识别
+            table=enable_table_recognition,  # 表格识别
+            recovery=False,  # PDF还原
             ocr=True,  # 文本识别
-            show_log=False,
             
             # 版面解析参数
             layout_model_dir=None,  # 自动下载PP-StructureV3模型
