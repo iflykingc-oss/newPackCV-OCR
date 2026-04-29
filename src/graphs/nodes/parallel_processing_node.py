@@ -114,7 +114,7 @@ def initialize_ocr_engine(ocr_engine_type: str, ocr_api_config: Optional[Dict[st
         if ocr_engine_type == "builtin":
             import paddleocr
             # 初始化PaddleOCR
-            engine = paddleocr.PaddleOCR(use_angle_cls=True, lang="ch", show_log=False)
+            engine = paddleocr.PaddleOCR(use_textline_orientation=True, lang="ch")
             return engine
         elif ocr_engine_type == "tesseract":
             # Tesseract不需要预初始化

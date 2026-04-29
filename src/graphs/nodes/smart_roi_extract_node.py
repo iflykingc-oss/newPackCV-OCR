@@ -123,7 +123,7 @@ def smart_roi_extract_node(
         # 初始化OCR
         try:
             from paddleocr import PaddleOCR
-            ocr = PaddleOCR(use_angle_cls=True, lang='ch', show_log=False)
+            ocr = PaddleOCR(use_textline_orientation=True, lang='ch')
             print(f"[智能ROI切割] PaddleOCR初始化成功")
         except ImportError:
             print(f"[智能ROI切割] PaddleOCR未安装，跳过OCR检测")

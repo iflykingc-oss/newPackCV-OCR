@@ -42,26 +42,7 @@ def route_processing_mode(state: GlobalState) -> str:
         return "单图处理"
 
 
-def route_model_processing(state: GlobalState) -> str:
-    """
-    title: 路由模型处理
-    desc: 根据model_type字段决定后续处理流程：extract(结构化提取)、correct(智能纠错)、qa(语义问答)
-    """
-    # 从状态中读取model_type
-    model_type = getattr(state, 'model_type', None)
-    
-    # 默认使用extract
-    if not model_type:
-        model_type = "extract"
-    
-    if model_type == "extract":
-        return "结构化提取"
-    elif model_type == "correct":
-        return "智能纠错"
-    elif model_type == "qa":
-        return "语义问答"
-    else:
-        return "结构化提取"  # 默认
+# 删除 route_model_processing 函数，改为串行流程
 
 
 def route_processing_node(state: RouteProcessingInput, config: RunnableConfig, runtime: Runtime[Context]) -> RouteProcessingOutput:
@@ -125,23 +106,11 @@ builder.add_conditional_edges(
 # 批量处理 -> 结束（批量处理节点自己完成所有工作）
 builder.add_edge("batch_process", END)
 
-# 单图处理流程：图片预处理 -> OCR识别
+# 单图处理流程：图片预处理 -> OCR识别 -> 智能纠错 -> 结构化提取 -> 语义问答 -> 结果输出
 builder.add_edge("image_preprocess", "ocr_recognize")
-
-# OCR识别 -> 条件分支（根据model_type选择）
-builder.add_conditional_edges(
-    source="ocr_recognize",
-    path=route_model_processing,
-    path_map={
-        "结构化提取": "model_extract",
-        "智能纠错": "correct_text",
-        "语义问答": "qa_answer"
-    }
-)
-
-# 所有模型处理分支 -> 结果输出
-builder.add_edge("model_extract", "result_output")
-builder.add_edge("correct_text", "result_output")
+builder.add_edge("ocr_recognize", "correct_text")
+builder.add_edge("correct_text", "model_extract")
+builder.add_edge("model_extract", "qa_answer")
 builder.add_edge("qa_answer", "result_output")
 
 # 结果输出 -> 结束

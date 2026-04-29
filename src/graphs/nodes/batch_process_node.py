@@ -45,7 +45,7 @@ def batch_process_node(state: BatchProcessInput, config: RunnableConfig, runtime
         # 初始化OCR引擎
         ocr_engine = None
         try:
-            ocr_engine = paddleocr.PaddleOCR(use_angle_cls=True, lang="ch", show_log=False)
+            ocr_engine = paddleocr.PaddleOCR(use_textline_orientation=True, lang="ch")
         except Exception as e:
             print(f"[批量处理] 初始化PaddleOCR失败: {str(e)}")
         

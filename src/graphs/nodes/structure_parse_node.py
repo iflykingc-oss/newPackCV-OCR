@@ -127,7 +127,19 @@ def perform_structure_parse(
         }
     """
     try:
-        from paddleocr import PPStructure
+        from paddleocr import PPStructure  # type: ignore
+    except (ImportError, AttributeError) as e:
+        print(f"[文档解析] PPStructure导入失败（可能PaddleOCR版本不兼容）: {e}")
+        # 返回空结果
+        return {
+            'layout_blocks': [],
+            'tables': [],
+            'seals': [],
+            'charts': [],
+            'formulas': [],
+            'markdown': '',
+            'json_output': {}
+        }
         
         print(f"[文档解析] 使用PP-Structure解析")
         
@@ -549,3 +561,27 @@ def extract_table_structure(table_data: Dict[str, Any]) -> Dict[str, Any]:
             "merged_cells": [],
             "statistics": {}
         }
+
+
+def default_structure_output(img_array: Any) -> StructureParseOutput:
+    """返回默认的结构化解析输出（当PPStructure不可用时）"""
+    import numpy as np
+
+    height, width = img_array.shape[:2] if len(img_array.shape) >= 2 else (1000, 1000)
+
+    return StructureParseOutput(
+        structure_type="text",
+        layout_blocks=[],
+        tables=[],
+        seals=[],
+        charts=[],
+        formulas=[],
+        text_lines=[],
+        image_info={
+            "width": width,
+            "height": height,
+            "channels": img_array.shape[2] if len(img_array.shape) == 3 else 1
+        },
+        markdown="",
+        json_output={}
+    )

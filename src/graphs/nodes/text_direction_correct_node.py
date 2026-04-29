@@ -142,7 +142,7 @@ def text_direction_correct_node(state: TextDirectionCorrectInput, config: Runnab
             try:
                 from paddleocr import PaddleOCR
 
-                ocr = PaddleOCR(use_angle_cls=True, lang='ch', show_log=False)
+                ocr = PaddleOCR(use_textline_orientation=True, lang='ch')
                 result = ocr.ocr(image, cls=True)
 
                 if result and result[0]:

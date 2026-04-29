@@ -6,9 +6,9 @@
 
 ### 核心特性
 1. **多平台适配**: 支持微信小程序、飞书多平台
-2. **高精度OCR识别**: 支持内置算法（PaddleOCR）和外部API
+2. **高精度OCR识别**: 支持EasyOCR（轻量稳定）、PaddleOCR、Tesseract，减少外部依赖
 3. **图片预处理**: 针对瓶子包装的图像增强、去噪、校正
-4. **智能模型调用**: 结构化提取、智能纠错、语义问答
+4. **智能模型调用**: 智能纠错 → 结构化提取 → 语义问答（串行流程）
 5. **批量处理**: 支持多张图片并行处理和结果合并导出
 6. **多格式导出**: 支持JSON、Excel、PDF格式
 7. **数据持久化**: 基于PostgreSQL的数据存储和ORM管理
@@ -22,10 +22,9 @@
 |--------|---------|------|---------|---------|---------|
 | route_processing | `graph.py` | condition | 路由处理模式（单图/批量） | batch→batch_process, single→image_preprocess | - |
 | image_preprocess | `nodes/image_preprocess_node.py` | task | 图片预处理，包括增强、去噪、校正 | - | - |
-| ocr_recognize | `nodes/ocr_recognize_node.py` | task | OCR识别，支持内置算法和外部API | - | - |
-| route_model_processing | `graph.py` | condition | 根据model_type选择处理路径 | extract→model_extract, correct→correct_text, qa→qa_answer | - |
-| model_extract | `nodes/model_extract_node.py` | agent | 结构化信息提取（品牌、规格、日期等） | - | `config/model_extract_llm_cfg.json` |
+| ocr_recognize | `nodes/ocr_recognize_node.py` | task | OCR识别，优先使用EasyOCR，备选PaddleOCR/Tesseract | - | - |
 | correct_text | `nodes/correct_text_node.py` | agent | 智能纠错，修复错别字、漏字 | - | `config/correct_text_llm_cfg.json` |
+| model_extract | `nodes/model_extract_node.py` | agent | 结构化信息提取（品牌、规格、日期等） | - | `config/model_extract_llm_cfg.json` |
 | qa_answer | `nodes/qa_answer_node.py` | agent | 语义问答，基于识别结果回答用户问题 | - | `config/qa_answer_llm_cfg.json` |
 | result_output | `nodes/result_output_node.py` | task | 结果输出，支持多格式导出和多平台推送 | - | - |
 | batch_process | `nodes/batch_process_node.py` | task | 批量处理多张图片，支持并行识别和结果导出 | - | - |
@@ -62,7 +61,7 @@
 
 ## 工作流图结构
 
-### 基础OCR工作流
+### 基础OCR工作流（V2.0 - 串行优化版）
 ```
 入口 (GraphInput)
   ↓
@@ -72,15 +71,23 @@
                      ↓
                    [OCR识别] (ocr_recognize)
                      ↓
-                   [条件分支] (route_model_processing)
-                     ├─ "结构化提取" → [模型结构化提取] (model_extract)
-                     ├─ "智能纠错" → [智能纠错] (correct_text)
-                     └─ "语义问答" → [语义问答] (qa_answer)
+                   [智能纠错] (correct_text)
+                     ↓
+                   [结构化提取] (model_extract)
+                     ↓
+                   [语义问答] (qa_answer)
                      ↓
                    [结果输出] (result_output)
                      ↓
                    出口 (GraphOutput)
 ```
+
+**V2.0优化说明**：
+- ✅ 将原来的三个独立分支改为**串行流程**
+- ✅ 先进行智能纠错（修复错别字、漏字）
+- ✅ 再进行结构化提取（提取品牌、规格、日期等）
+- ✅ 最后进行语义问答（基于结构化数据回答问题）
+- ✅ OCR引擎：优先使用EasyOCR（轻量、稳定），备选PaddleOCR和Tesseract
 
 ### PackCV-OCR 融合算法工作流
 ```

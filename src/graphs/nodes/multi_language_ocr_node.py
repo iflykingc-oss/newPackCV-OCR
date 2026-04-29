@@ -128,10 +128,9 @@ def perform_multi_language_ocr(
         
         # 初始化PaddleOCR
         ocr = PaddleOCR(
-            use_angle_cls=True,
+            use_textline_orientation=True,
             lang=lang_code,
             use_gpu=False,
-            show_log=False,
             # 优化参数
             det_db_thresh=0.3,
             det_db_box_thresh=0.6,

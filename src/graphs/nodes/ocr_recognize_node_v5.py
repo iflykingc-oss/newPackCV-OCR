@@ -201,10 +201,9 @@ def perform_ocr_with_paddle_v5(
         # 初始化PaddleOCR（PP-OCRv5）
         ocr = PaddleOCR(
             # 使用PP-OCRv4模型（v5暂不兼容当前PaddlePaddle版本）
-            use_angle_cls=enable_vertical_text,
+            use_textline_orientation=enable_vertical_text,
             lang=lang,
             use_gpu=False,
-            show_log=False,
             
             # PP-OCRv5特定参数
             det_model_dir=None,  # 自动下载PP-OCRv5_server_det
@@ -242,10 +241,9 @@ def perform_ocr_with_paddle_v4(image: np.ndarray) -> Dict[str, Any]:
         print(f"[OCR v5] 使用PP-OCRv4降级方案")
         
         ocr = PaddleOCR(
-            use_angle_cls=True,
+            use_textline_orientation=True,
             lang="ch",
-            use_gpu=False,
-            show_log=False
+            use_gpu=False
         )
         
         result = ocr.ocr(image, cls=True)
