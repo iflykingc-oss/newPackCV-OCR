@@ -98,17 +98,35 @@ def _use_builtin_ocr(
     start_time: float,
     ctx: Context
 ) -> OCRRecognizeOutput:
-    """使用内置OCR算法（PaddleOCR）"""
+    """使用内置OCR算法（优先使用Tesseract，避免下载模型）"""
+    # 优先使用Tesseract（不需要下载模型，快速响应）
+    print("[OCR识别] 优先尝试Tesseract OCR（无需下载模型）")
+    tesseract_result = _use_tesseract_ocr(image_path, start_time, ctx)
+
+    # 如果Tesseract成功且有识别结果，直接返回
+    if tesseract_result.raw_text and tesseract_result.raw_text.strip():
+        print(f"[OCR识别] Tesseract识别成功，识别{len(tesseract_result.regions)}个区域")
+        return tesseract_result
+
+    # Tesseract失败或无结果，尝试EasyOCR
+    print("[OCR识别] Tesseract无结果，尝试EasyOCR")
+    easyocr_result = _use_easyocr(image_path, start_time, ctx)
+
+    if easyocr_result.raw_text and easyocr_result.raw_text.strip():
+        print(f"[OCR识别] EasyOCR识别成功，识别{len(easyocr_result.regions)}个区域")
+        return easyocr_result
+
+    # EasyOCR也失败，尝试PaddleOCR作为最后备选
+    print("[OCR识别] EasyOCR无结果，尝试PaddleOCR")
     try:
         from paddleocr import PaddleOCR
-        
+
         print("[OCR识别] 使用PaddleOCR引擎进行识别")
-        
+
         # 初始化OCR引擎（支持中英文混合）
         ocr = PaddleOCR(
             use_textline_orientation=True,
-            lang="ch",
-            use_gpu=False
+            lang="ch"
         )
         
         # 执行识别
@@ -160,11 +178,11 @@ def _use_builtin_ocr(
         )
         
     except ImportError:
-        print("[OCR识别] PaddleOCR未安装，尝试使用EasyOCR")
-        return _use_easyocr(image_path, start_time, ctx)
+        print("[OCR识别] PaddleOCR未安装")
+        return tesseract_result  # 返回Tesseract的结果
     except Exception as e:
-        print(f"[OCR识别] PaddleOCR识别失败: {e}，尝试使用EasyOCR")
-        return _use_easyocr(image_path, start_time, ctx)
+        print(f"[OCR识别] PaddleOCR识别失败: {e}")
+        return tesseract_result  # 返回Tesseract的结果
 
 
 def _use_easyocr(image_path: str, start_time: float, ctx: Context) -> OCRRecognizeOutput:
