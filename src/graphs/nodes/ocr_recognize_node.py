@@ -1,21 +1,156 @@
-# -*- coding: utf-8 -*-
 """
-OCR识别节点
-支持内置OCR算法和外部API调用，识别包装上的文字信息
+OCR识别节点 - 基于内嵌OCR + Tesseract
+不依赖外部API下载，即插即用
 """
 
-import os
-import re
+import io
 import json
-import time
 import base64
-import requests
-from typing import Dict, Any, List
+import time
+import logging
+from typing import Optional, List, Dict, Any
+
+import cv2
+import numpy as np
+import pytesseract
+from PIL import Image
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from coze_coding_utils.runtime_ctx.context import Context
-from graphs.state import OCRRecognizeInput, OCRRecognizeOutput
-from utils.file.file import File
+
+from graphs.state import (
+    OCRRecognizeInput,
+    OCRRecognizeOutput,
+    OCRResult
+)
+from storage.oss import OSSStorage
+from core.ocr.builtin_ocr import builtin_ocr, pattern_ocr, extract_structured_info
+
+
+logger = logging.getLogger(__name__)
+
+
+def download_image(url: str) -> Optional[np.ndarray]:
+    """下载图片"""
+    import requests
+    
+    try:
+        response = requests.get(url, timeout=15)
+        if response.status_code == 200:
+            img_array = np.frombuffer(response.content, np.uint8)
+            img = cv2.imdecode(img_array, cv2.IMREAD_COLOR)
+            return img
+    except Exception as e:
+        logger.warning(f"下载图片失败: {e}")
+    return None
+
+
+def preprocess_for_ocr(img: np.ndarray) -> np.ndarray:
+    """OCR专用图像预处理"""
+    # 转为灰度
+    if len(img.shape) == 3:
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = img.copy()
+    
+    # 去噪
+    denoised = cv2.fastNlMeansDenoising(gray, h=10)
+    
+    # 对比度增强 (CLAHE)
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    enhanced = clahe.apply(denoised)
+    
+    # 锐化
+    kernel = np.array([[-1, -1, -1],
+                       [-1,  9, -1],
+                       [-1, -1, -1]])
+    sharpened = cv2.filter2D(enhanced, -1, kernel)
+    
+    return sharpened
+
+
+def use_tesseract_ocr(img: np.ndarray) -> OCRResult:
+    """
+    使用Tesseract OCR进行文字识别
+    支持中英文混合识别
+    """
+    try:
+        # 预处理
+        processed = preprocess_for_ocr(img)
+        
+        # 转为PIL Image
+        pil_img = Image.fromarray(processed)
+        
+        # Tesseract配置：中文+英文，数字优先
+        config = '--psm 6 -l chi_sim+eng --oem 3'
+        
+        # 识别文字
+        text = pytesseract.image_to_string(pil_img, config=config)
+        
+        # 获取置信度
+        data = pytesseract.image_to_data(pil_img, config=config, output_type=pytesseract.Output.DICT)
+        
+        # 计算平均置信度
+        confidences = [conf for conf in data['conf'] if conf != -1]
+        avg_confidence = sum(confidences) / len(confidences) / 100.0 if confidences else 0.5
+        
+        # 清理文本
+        lines = [line.strip() for line in text.split('\n') if line.strip()]
+        cleaned_text = '\n'.join(lines)
+        
+        # 提取结构化信息
+        structured = extract_structured_info(cleaned_text)
+        
+        return OCRResult(
+            raw_text=cleaned_text,
+            confidence=avg_confidence,
+            regions=[],
+            metadata={
+                "engine": "tesseract",
+                "languages": ["chi_sim", "eng"],
+                "structured_info": structured
+            }
+        )
+        
+    except Exception as e:
+        logger.error(f"Tesseract OCR错误: {e}")
+        return OCRResult(
+            raw_text="",
+            confidence=0.0,
+            regions=[],
+            metadata={"engine": "tesseract", "error": str(e)}
+        )
+
+
+def use_builtin_ocr(img: np.ndarray) -> OCRResult:
+    """
+    使用内嵌的轻量级OCR
+    基于OpenCV图像处理
+    """
+    try:
+        # 保存到临时文件
+        _, buffer = cv2.imencode('.jpg', img)
+        temp_path = '/tmp/builtin_ocr_temp.jpg'
+        cv2.imwrite(temp_path, img)
+        
+        # 使用内嵌OCR
+        result = builtin_ocr.ocr(temp_path)
+        
+        return OCRResult(
+            raw_text=result.raw_text,
+            confidence=result.confidence,
+            regions=result.regions,
+            metadata={"engine": "builtin", **result.metadata}
+        )
+        
+    except Exception as e:
+        logger.error(f"内嵌OCR错误: {e}")
+        return OCRResult(
+            raw_text="",
+            confidence=0.0,
+            regions=[],
+            metadata={"engine": "builtin", "error": str(e)}
+        )
 
 
 def ocr_recognize_node(
@@ -24,316 +159,75 @@ def ocr_recognize_node(
     runtime: Runtime[Context]
 ) -> OCRRecognizeOutput:
     """
-    title: OCR识别
-    desc: 使用内置OCR算法或外部API识别包装上的文字信息，支持多语言混合文本
-    integrations: Tesseract, EasyOCR
+    title: OCR文字识别
+    desc: 识别图片中的文字内容，支持中文和英文。使用Tesseract OCR引擎，无需下载外部模型。
+    integrations: Tesseract OCR
     """
     ctx = runtime.context
     start_time = time.time()
-
-    print("[OCR识别] 节点开始执行")
-
-    # 获取图片路径（优先使用预处理图片，然后是原始图片）
-    image_path = None
-    if state.image:
-        image_path = state.image.url
-        print(f"[OCR识别] 使用image字段: {image_path}")
-    elif state.preprocessed_image:
-        image_path = state.preprocessed_image.url
-        print(f"[OCR识别] 使用preprocessed_image字段: {image_path}")
-    elif state.package_image:
-        image_path = state.package_image.url
-        print(f"[OCR识别] 使用package_image字段: {image_path}")
-    else:
-        print("[OCR识别] 没有可用的图片")
-        return OCRRecognizeOutput(
-            ocr_raw_result="",
-            raw_text="",
-            ocr_confidence=0.0,
-            confidence=0.0,
-            ocr_regions=[],
-            regions=[],
-            engine_used="none",
-            processing_time=time.time() - start_time
-        )
-
-    # 如果是URL，先下载
-    if image_path.startswith("http://") or image_path.startswith("https://"):
-        temp_path = f"/tmp/ocr_input_{int(time.time())}.jpg"
-        print(f"[OCR识别] 开始下载图片到 {temp_path}")
-        try:
-            resp = requests.get(image_path, timeout=30)
-            resp.raise_for_status()
-            with open(temp_path, "wb") as f:
-                f.write(resp.content)
-            image_path = temp_path
-            print(f"[OCR识别] 图片下载成功，保存到 {image_path}")
-        except Exception as e:
-            print(f"[OCR识别] 下载图片失败: {e}")
-            return OCRRecognizeOutput(
-                ocr_raw_result="",
-                raw_text="",
-                ocr_confidence=0.0,
-                confidence=0.0,
-                ocr_regions=[],
-                regions=[],
-                engine_used="none",
-                processing_time=time.time() - start_time
-            )
-
-    print(f"[OCR识别] 准备调用OCR引擎，image_path={image_path}, ocr_engine_type={state.ocr_engine_type}")
-
-    # 根据OCR引擎类型选择识别方式
-    if state.ocr_engine_type == "api" and state.ocr_api_config:
-        print("[OCR识别] 调用外部API")
-        return _call_ocr_api(state, image_path, start_time, ctx)
-    else:
-        print("[OCR识别] 调用内置OCR引擎")
-        return _use_builtin_ocr(state, image_path, start_time, ctx)
-
-
-def _use_builtin_ocr(
-    state: OCRRecognizeInput,
-    image_path: str,
-    start_time: float,
-    ctx: Context
-) -> OCRRecognizeOutput:
-    """使用内置OCR算法（优先使用Tesseract，避免下载模型）"""
-    # 优先使用Tesseract（不需要下载模型，快速响应）
-    print("[OCR识别] 优先尝试Tesseract OCR（无需下载模型）")
-    tesseract_result = _use_tesseract_ocr(image_path, start_time, ctx)
-
-    # 如果Tesseract成功且有识别结果，直接返回
-    if tesseract_result.raw_text and tesseract_result.raw_text.strip():
-        print(f"[OCR识别] Tesseract识别成功，识别{len(tesseract_result.regions)}个区域")
-        return tesseract_result
-
-    # Tesseract失败或无结果，尝试EasyOCR
-    print("[OCR识别] Tesseract无结果，尝试EasyOCR")
-    easyocr_result = _use_easyocr(image_path, start_time, ctx)
-
-    if easyocr_result.raw_text and easyocr_result.raw_text.strip():
-        print(f"[OCR识别] EasyOCR识别成功，识别{len(easyocr_result.regions)}个区域")
-        return easyocr_result
-
-    # 注意：PaddleOCR已禁用，因其首次使用会下载大量模型（数百MB），导致长时间卡顿
-    # 如果需要启用PaddleOCR，请在下方取消注释
-    # print("[OCR识别] EasyOCR无结果，尝试PaddleOCR")
-    # try:
-    #     from paddleocr import PaddleOCR
-    #     ocr = PaddleOCR(use_textline_orientation=True, lang="ch")
-    #     result = ocr.ocr(image_path, cls=True)
-    #     # ... 解析结果
-    # except Exception as e:
-    #     print(f"[OCR识别] PaddleOCR识别失败: {e}")
-
-    # 所有引擎都失败，返回EasyOCR的结果（即使为空）
-    print("[OCR识别] 所有OCR引擎都无法识别，返回结果")
-    return easyocr_result
-
-
-def _use_easyocr(image_path: str, start_time: float, ctx: Context) -> OCRRecognizeOutput:
-    """使用EasyOCR作为备选方案（轻量级，依赖少，更稳定）"""
+    
+    logger.info(f"开始OCR识别: {state.package_image.url}")
+    
     try:
-        import easyocr
-
-        print("[OCR识别] 使用EasyOCR引擎进行识别")
-
-        # 初始化EasyOCR（支持中英文混合）
-        reader = easyocr.Reader(['ch_sim', 'en'], gpu=False)
-
-        # 执行识别
-        result = reader.readtext(image_path)
-
-        # 解析结果
-        raw_text = ""
-        regions = []
-        confidences = []
-
-        for item in result:
-            # item格式: (bbox, text, confidence)
-            bbox = item[0]  # [[x1,y1], [x2,y2], [x3,y3], [x4,y4]]
-            text = item[1]
-            conf = float(item[2])
-
-            if text:
-                raw_text += text + "\n"
-                regions.append({
-                    "text": text,
-                    "confidence": conf,
-                    "bbox": bbox
-                })
-                confidences.append(conf)
-
-        # 计算平均置信度
-        avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
-
-        processing_time = time.time() - start_time
-
-        print(f"[OCR识别] EasyOCR完成，耗时{processing_time:.2f}秒，识别{len(regions)}个区域")
-
-        return OCRRecognizeOutput(
-            ocr_raw_result=raw_text.strip(),
-            raw_text=raw_text.strip(),
-            ocr_confidence=avg_confidence,
-            confidence=avg_confidence,
-            ocr_regions=regions,
-            regions=regions,
-            engine_used="easyocr",
-            processing_time=processing_time
-        )
-
-    except ImportError:
-        print("[OCR识别] EasyOCR未安装，尝试使用Tesseract OCR")
-        return _use_tesseract_ocr(image_path, start_time, ctx)
-    except Exception as e:
-        print(f"[OCR识别] EasyOCR识别失败: {e}，尝试使用Tesseract OCR")
-        return _use_tesseract_ocr(image_path, start_time, ctx)
-
-
-def _use_tesseract_ocr(image_path: str, start_time: float, ctx: Context) -> OCRRecognizeOutput:
-    """使用Tesseract OCR作为备选方案"""
-    try:
-        import pytesseract
-        
-        # 识别文本
-        text = pytesseract.image_to_string(image_path, lang='chi_sim+eng')
-        
-        # 获取详细数据（包括置信度）
-        data = pytesseract.image_to_data(image_path, lang='chi_sim+eng', output_type=pytesseract.Output.DICT)
-        
-        # 解析区域
-        regions = []
-        confidences = []
-        for i in range(len(data['text'])):
-            t = data['text'][i]
-            conf = data['conf'][i]
-            
-            if t.strip() and int(conf) > 0:
-                regions.append({
-                    "text": t,
-                    "confidence": int(conf) / 100.0,
-                    "bbox": [
-                        [data['left'][i], data['top'][i]],
-                        [data['left'][i] + data['width'][i], data['top'][i]],
-                        [data['left'][i] + data['width'][i], data['top'][i] + data['height'][i]],
-                        [data['left'][i], data['top'][i] + data['height'][i]]
-                    ]
-                })
-                confidences.append(int(conf) / 100.0)
-        
-        avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
-        
-        return OCRRecognizeOutput(
-            ocr_raw_result=text,
-            raw_text=text,
-            ocr_confidence=avg_confidence,
-            confidence=avg_confidence,
-            ocr_regions=regions,
-            regions=regions,
-            engine_used="tesseract",
-            processing_time=time.time() - start_time
-        )
-        
-    except Exception as e:
-        print(f"[OCR识别] Tesseract OCR识别失败: {e}")
-        return OCRRecognizeOutput(
-            ocr_raw_result="",
-            raw_text="",
-            ocr_confidence=0.0,
-            confidence=0.0,
-            ocr_regions=[],
-            regions=[],
-            engine_used="none",
-            processing_time=time.time() - start_time
-        )
-
-
-def _call_ocr_api(
-    state: OCRRecognizeInput,
-    image_path: str,
-    start_time: float,
-    ctx: Context
-) -> OCRRecognizeOutput:
-    """调用外部OCR API"""
-    try:
-        api_config = state.ocr_api_config
-        if not api_config:
-            print("[OCR识别] OCR API配置为空")
+        # 下载图片
+        img = download_image(state.package_image.url)
+        if img is None:
             return OCRRecognizeOutput(
-                ocr_raw_result="",
                 raw_text="",
-                ocr_confidence=0.0,
-                confidence=0.0,
-                ocr_regions=[],
-                regions=[],
-                engine_used="api_failed",
-                processing_time=time.time() - start_time
-            )
-
-        api_url = api_config.get("url", "")
-        api_key = api_config.get("api_key", "")
-        
-        if not api_url:
-            print("[OCR识别] OCR API配置缺少url")
-            return OCRRecognizeOutput(
-                ocr_raw_result="",
-                raw_text="",
-                ocr_confidence=0.0,
-                confidence=0.0,
-                ocr_regions=[],
-                regions=[],
-                engine_used="api_failed",
-                processing_time=time.time() - start_time
+                ocr_result=OCRResult(
+                    raw_text="",
+                    confidence=0.0,
+                    regions=[],
+                    metadata={"error": "无法下载图片"}
+                ),
+                export_file_url=""
             )
         
-        # 读取图片并转换为base64
-        with open(image_path, "rb") as f:
-            image_data = f.read()
-        image_base64 = base64.b64encode(image_data).decode("utf-8")
+        logger.info(f"图片下载成功，尺寸: {img.shape}")
         
-        # 调用API
-        headers = {
-            "Content-Type": "application/json"
-        }
-        if api_key:
-            headers["Authorization"] = f"Bearer {api_key}"
+        # 优先使用Tesseract OCR
+        result = use_tesseract_ocr(img)
         
-        payload = {
-            "image": image_base64,
-            "language": "zh-cn,en"
+        # 如果Tesseract没有结果，尝试内嵌OCR
+        if not result.raw_text.strip():
+            logger.info("Tesseract无结果，尝试内嵌OCR")
+            result = use_builtin_ocr(img)
+        
+        elapsed_time = time.time() - start_time
+        logger.info(f"OCR识别完成，耗时: {elapsed_time:.2f}秒")
+        logger.info(f"识别文本: {result.raw_text[:200]}...")
+        
+        # 上传结果到OSS
+        oss = OSSStorage()
+        result_data = {
+            "raw_text": result.raw_text,
+            "confidence": result.confidence,
+            "metadata": result.metadata,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
         }
         
-        resp = requests.post(api_url, json=payload, headers=headers, timeout=30)
-        resp.raise_for_status()
+        result_json = json.dumps(result_data, ensure_ascii=False, indent=2)
+        result_bytes = result_json.encode('utf-8')
         
-        result = resp.json()
-        
-        # 解析API响应
-        raw_text = result.get("text", "")
-        regions = result.get("regions", [])
-        confidence = result.get("confidence", 0.0)
+        file_name = f"ocr_results/ocr_result_{int(time.time())}.json"
+        oss.upload_file(result_bytes, file_name, 'application/json')
+        export_url = oss.generate_presigned_url(file_name, expire_time=3600)
         
         return OCRRecognizeOutput(
-            ocr_raw_result=raw_text,
-            raw_text=raw_text,
-            ocr_confidence=confidence,
-            confidence=confidence,
-            ocr_regions=regions,
-            regions=regions,
-            engine_used="api",
-            processing_time=time.time() - start_time
+            raw_text=result.raw_text,
+            ocr_result=result,
+            export_file_url=export_url
         )
         
     except Exception as e:
-        print(f"[OCR识别] OCR API调用失败: {e}")
+        logger.error(f"OCR识别异常: {e}")
         return OCRRecognizeOutput(
-            ocr_raw_result="",
             raw_text="",
-            ocr_confidence=0.0,
-            confidence=0.0,
-            ocr_regions=[],
-            regions=[],
-            engine_used="api_failed",
-            processing_time=time.time() - start_time
+            ocr_result=OCRResult(
+                raw_text="",
+                confidence=0.0,
+                regions=[],
+                metadata={"error": str(e)}
+            ),
+            export_file_url=""
         )
