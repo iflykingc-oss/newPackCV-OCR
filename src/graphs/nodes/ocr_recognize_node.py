@@ -26,7 +26,7 @@ def ocr_recognize_node(
     """
     title: OCR识别
     desc: 使用内置OCR算法或外部API识别包装上的文字信息，支持多语言混合文本
-    integrations: EasyOCR, PaddleOCR
+    integrations: Tesseract, EasyOCR
     """
     ctx = runtime.context
     start_time = time.time()
@@ -116,73 +116,20 @@ def _use_builtin_ocr(
         print(f"[OCR识别] EasyOCR识别成功，识别{len(easyocr_result.regions)}个区域")
         return easyocr_result
 
-    # EasyOCR也失败，尝试PaddleOCR作为最后备选
-    print("[OCR识别] EasyOCR无结果，尝试PaddleOCR")
-    try:
-        from paddleocr import PaddleOCR
+    # 注意：PaddleOCR已禁用，因其首次使用会下载大量模型（数百MB），导致长时间卡顿
+    # 如果需要启用PaddleOCR，请在下方取消注释
+    # print("[OCR识别] EasyOCR无结果，尝试PaddleOCR")
+    # try:
+    #     from paddleocr import PaddleOCR
+    #     ocr = PaddleOCR(use_textline_orientation=True, lang="ch")
+    #     result = ocr.ocr(image_path, cls=True)
+    #     # ... 解析结果
+    # except Exception as e:
+    #     print(f"[OCR识别] PaddleOCR识别失败: {e}")
 
-        print("[OCR识别] 使用PaddleOCR引擎进行识别")
-
-        # 初始化OCR引擎（支持中英文混合）
-        ocr = PaddleOCR(
-            use_textline_orientation=True,
-            lang="ch"
-        )
-        
-        # 执行识别
-        result = ocr.ocr(image_path, cls=True)
-        
-        # 解析结果
-        raw_text = ""
-        regions = []
-        total_confidence = 0.0
-        region_count = 0
-        
-        if result and result[0]:
-            for line in result[0]:
-                if line:
-                    # line格式: [[[x1,y1], [x2,y2], [x3,y3], [x4,y4]], (text, confidence)]
-                    box = line[0]
-                    text_info = line[1]
-                    
-                    text = text_info[0] if text_info else ""
-                    conf = float(text_info[1]) if text_info and len(text_info) > 1 else 0.0
-                    
-                    if text:
-                        raw_text += text + "\n"
-                        regions.append({
-                            "text": text,
-                            "confidence": conf,
-                            "bbox": box
-                        })
-                        total_confidence += conf
-                        region_count += 1
-        
-        # 计算平均置信度
-        avg_confidence = total_confidence / region_count if region_count > 0 else 0.0
-        
-        processing_time = time.time() - start_time
-        
-        print(f"[OCR识别] 完成，耗时{processing_time:.2f}秒，识别{len(regions)}个区域")
-        
-        # 确保输出两种字段名（ocr_raw_result 和 raw_text），兼容不同的下游节点
-        return OCRRecognizeOutput(
-            ocr_raw_result=raw_text.strip(),
-            raw_text=raw_text.strip(),
-            ocr_confidence=avg_confidence,
-            confidence=avg_confidence,
-            ocr_regions=regions,
-            regions=regions,
-            engine_used="paddleocr",
-            processing_time=processing_time
-        )
-        
-    except ImportError:
-        print("[OCR识别] PaddleOCR未安装")
-        return tesseract_result  # 返回Tesseract的结果
-    except Exception as e:
-        print(f"[OCR识别] PaddleOCR识别失败: {e}")
-        return tesseract_result  # 返回Tesseract的结果
+    # 所有引擎都失败，返回EasyOCR的结果（即使为空）
+    print("[OCR识别] 所有OCR引擎都无法识别，返回结果")
+    return easyocr_result
 
 
 def _use_easyocr(image_path: str, start_time: float, ctx: Context) -> OCRRecognizeOutput:
