@@ -1,3 +1,5 @@
+# Git忽略文件
+
 # Python
 __pycache__/
 *.py[cod]
@@ -20,11 +22,11 @@ wheels/
 .installed.cfg
 *.egg
 
-# Virtual Environment
+# 虚拟环境
 venv/
 ENV/
 env/
-.venv
+.venv/
 
 # IDE
 .vscode/
@@ -33,128 +35,46 @@ env/
 *.swo
 *~
 
-# OS
-.DS_Store
-Thumbs.db
+# 测试
+.pytest_cache/
+.coverage
+htmlcov/
+.tox/
 
-# Logs
+# 日志
 *.log
 logs/
-*.out
 
-# Database
+# 数据文件
+*.csv
+*.xlsx
 *.db
 *.sqlite
-*.sqlite3
 
-# Environment variables
+# 临时文件
+tmp/
+temp/
+*.tmp
+
+# 环境配置
 .env
 .env.local
 .env.*.local
 
-# Temporary files
-*.tmp
-*.temp
-*.bak
-*.swp
-~*
+# 模型文件（如果不在仓库中）
+# models/
+# checkpoints/
 
-# Test coverage
-.coverage
-htmlcov/
-.pytest_cache/
+# Docker
+.dockerignore
 
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
+# OS
+.DS_Store
+Thumbs.db
 
-# Jupyter Notebook
-.ipynb_checkpoints
+# 文档生成
+site/
+_build/
 
-# pyenv
-.python-version
-
-# pipenv
-Pipfile.lock
-
-# PEP 582
-__pypackages__/
-
-# Celery
-celerybeat-schedule
-celerybeat.pid
-
-# SageMath
-*.sage.py
-
-# Environments
-.env
-.venv
-env/
-venv/
-ENV/
-env.bak/
-venv.bak/
-
-# Spyder project settings
-.spyderproject
-.spyproject
-
-# Rope project settings
-.ropeproject
-
-# mkdocs documentation
-/site
-
-# mypy
-.mypy_cache/
-.dmypy.json
-dmypy.json
-
-# Pyre type checker
-.pyre/
-
-# pytype static type analyzer
-.pytype/
-
-# Cython debug symbols
-cython_debug/
-
-# PyCharm
-.idea/
-
-# Local testing
-assets/mock/
-tmp/
-temp/
-
-# Database backups
-*.sql.bak
-*.db.bak
-
-# Model cache
-models_cache/
-*.pth
-*.pt
-*.onnx
-
-# YOLOv8 models
-runs/
-yolov8*.pt
-
-# Uploads
-uploads/
-tmp_uploads/
-
-# Large files
-*.zip
-*.tar
-*.tar.gz
-*.rar
-*.7z
-
-# Keep PUSH_TO_GITHUB.md and other important files
-!PUSH_TO_GITHUB.md
-!AGENTS.md
-!README.md
+# Node（如果有前端）
+node_modules/
