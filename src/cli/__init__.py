@@ -15,12 +15,12 @@ from typing import List, Optional
 # 添加项目根目录到路径
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from src.core.ocr.ocr_scheduler import OCRScheduler
-from src.core.cv.preprocessor import ImagePreprocessor
-from src.core.cv.detector import ObjectDetector
-from src.core.rule_engine.validator import ExpiryValidator
-from src.core.rule_engine.alert import AlertManager
-from src.storage.oss import upload_image
+from core.ocr.ocr_scheduler import OCRScheduler
+from core.cv.preprocessor import ImagePreprocessor
+from core.cv.detector import ObjectDetector
+from core.rule_engine.validator import ExpiryValidator
+from core.rule_engine.alert import AlertManager
+from storage.oss import upload_image
 from utils.file.file import FileOps
 
 logging.basicConfig(
@@ -216,7 +216,7 @@ class PackCVCLI:
 
         # 生成报表
         if report_type == "expiry":
-            from src.storage.db import ReportModel
+            from storage.db import ReportModel
             report = self._generate_expiry_report(all_data)
         elif report_type == "stock":
             report = self._generate_stock_report(all_data)

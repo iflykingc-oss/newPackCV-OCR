@@ -15,11 +15,11 @@ from io import BytesIO
 # 添加项目根目录
 sys.path.insert(0, str(Path(__file__).parent.parent.parent))
 
-from src.core.cv.preprocessor import ImagePreprocessor
-from src.core.ocr.ocr_scheduler import OCRScheduler
-from src.core.rule_engine.validator import ExpiryValidator
-from src.core.rule_engine.alert import AlertManager
-from src.core.llm.decision_maker import LLMEvidenceEvaluator
+from core.cv.preprocessor import ImagePreprocessor
+from core.ocr.ocr_scheduler import OCRScheduler
+from core.rule_engine.validator import ExpiryValidator
+from core.rule_engine.alert import AlertManager
+from core.llm.decision_maker import LLMEvidenceEvaluator
 
 
 class TestImagePreprocessor:
@@ -226,12 +226,12 @@ class TestOCRWorkflow:
 
     @pytest.fixture
     def workflow(self):
-        from src.graphs.graph import main_graph
+        from graphs.graph import main_graph
         return main_graph
 
     def test_simple_ocr_pipeline(self, workflow):
         """测试简单OCR流程"""
-        from src.graphs.state import GraphInput
+        from graphs.state import GraphInput
         from utils.file.file import File
 
         # 创建测试输入

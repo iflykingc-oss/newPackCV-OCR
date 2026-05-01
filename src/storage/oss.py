@@ -47,7 +47,7 @@ class OSSStorage:
     def _init_client(self):
         """初始化S3客户端"""
         try:
-            from src.tools.s3_tool import S3SyncStorage
+            from tools.s3_tool import S3SyncStorage
             self._client = S3SyncStorage(
                 endpoint=self.endpoint,
                 access_key=self.access_key,

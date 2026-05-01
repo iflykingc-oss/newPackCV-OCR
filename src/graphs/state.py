@@ -140,6 +140,23 @@ class OCRRecognizeOutput(BaseModel):
     processing_time: float = Field(default=0.0, description="处理耗时（秒）")
 
 
+class OCRResult(BaseModel):
+    """OCR识别结果数据结构"""
+    raw_text: str = Field(default="", description="识别的原始文本")
+    confidence: float = Field(default=0.0, description="整体置信度")
+    regions: List[Dict[str, Any]] = Field(default_factory=list, description="识别区域列表")
+    engine: str = Field(default="builtin", description="使用的OCR引擎")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="额外元数据")
+
+
+class TextRegion(BaseModel):
+    """文本区域"""
+    text: str = Field(default="", description="识别出的文本")
+    confidence: float = Field(default=0.0, description="置信度")
+    bbox: List[int] = Field(default_factory=list, description="边界框坐标 [x1, y1, x2, y2]")
+    type: str = Field(default="text", description="文本类型：text/date/batch_number")
+
+
 # ==================== 模型结构化提取节点 ====================
 
 class ModelExtractInput(BaseModel):
