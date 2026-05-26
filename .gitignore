@@ -78,3 +78,4 @@ _build/
 
 # Node（如果有前端）
 node_modules/
+.cozeproj/reduction
