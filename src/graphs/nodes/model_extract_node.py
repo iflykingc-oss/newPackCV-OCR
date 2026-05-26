@@ -17,6 +17,80 @@ from graphs.state import ModelExtractInput, ModelExtractOutput
 from langchain_core.messages import SystemMessage, HumanMessage
 
 
+def rule_based_extract(ocr_text: str, template_fields: List[str]) -> Dict[str, Any]:
+    """
+    基于规则的结构化提取，不依赖LLM
+    使用正则表达式从OCR文本中提取关键字段
+    """
+    result = {}
+    
+    # 定义提取规则
+    rules = {
+        "brand": [
+            r"(?:品牌|商标|生产商)[：:]\s*([\u4e00-\u9fa5A-Za-z0-9]+)",
+            r"^([\u4e00-\u9fa5]{2,8}(?:牌|集团|股份|有限|公司|厂))",
+        ],
+        "product_name": [
+            r"(?:产品名称|品名|名称)[：:]\s*([\u4e00-\u9fa5A-Za-z0-9/（()）]+)",
+            r"^(?:[\u4e00-\u9fa5]*(?:油|奶|饮料|酒|米|面|茶|糖|粉|酱|醋|调料|食品|用品))\b",
+        ],
+        "specification": [
+            r"(?:净含量|规格|容量|体积|重量)[：:]*\s*([\d.]+)\s*(L|ml|g|kg|毫升|升|克|千克)",
+            r"([\d.]+)\s*(L|ml|g|kg|毫升|升|克|千克)",
+        ],
+        "production_date": [
+            r"(?:生产日期|生产|日期|制造日期)[：:]*\s*(\d{4}[-/年.]?\d{1,2}[-/月.]?\d{1,2})",
+            r"(\d{4}[-/年]\d{1,2}[-/月]\d{1,2})",
+            r"(\d{4}[-/.]\d{2}[-/.]\d{2})",
+        ],
+        "shelf_life": [
+            r"(?:保质期|有效期|有效期限|保质)[：:]*\s*(\d{1,3})\s*(?:天|日|个月|年)",
+            r"(?:保质期至|有效期至|有效期到)[：:]*\s*(\d{4}[-/年.]?\d{1,2}[-/月.]?\d{1,2})",
+            r"(\d{4}[-/.]\d{2}[-/.]\d{2})",
+        ],
+        "manufacturer": [
+            r"(?:制造商|生产商|生产厂家|厂家|委托方|出品)[：:]\s*([\u4e00-\u9fa5A-Za-z0-9（()）]+)",
+        ],
+        "ingredients": [
+            r"(?:配料|成分|原料|材质)[：:]\s*(.+?)(?:\n|$)",
+        ],
+        "standard": [
+            r"(?:执行标准|标准号|产品标准)[：:]\s*([A-Z0-9/.\-]+)",
+        ],
+        "batch_number": [
+            r"(?:批号|批次|生产批号)[：:]\s*([A-Za-z0-9\-]+)",
+        ],
+        "license_number": [
+            r"(?:生产许可证|许可证|SC编号|食品生产许可证)[：:]\s*([A-Za-z0-9\-]+)",
+        ],
+    }
+    
+    for field, patterns in rules.items():
+        for pattern in patterns:
+            match = re.search(pattern, ocr_text)
+            if match:
+                result[field] = match.group(1).strip()
+                break
+    
+    # 如果template_fields指定了，只返回指定字段
+    if template_fields:
+        for field in template_fields:
+            if field not in result:
+                result[field] = "N/A"
+    else:
+        # 默认字段
+        default_fields = ["brand", "product_name", "specification", "production_date", "shelf_life", "manufacturer"]
+        for field in default_fields:
+            if field not in result:
+                result[field] = "N/A"
+        # 补充其他找到的字段
+        for field in rules:
+            if field not in default_fields and field in result:
+                result[field] = result[field]
+    
+    return result
+
+
 def model_extract_node(
     state: ModelExtractInput,
     config: RunnableConfig,
@@ -110,9 +184,15 @@ def model_extract_node(
         )
         
     except Exception as e:
-        print(f"模型结构化提取失败: {str(e)}")
+        print(f"模型结构化提取失败: {str(e)}，降级到规则引擎")
+        # 降级到规则引擎
+        rule_data = rule_based_extract(ocr_text, state.template_fields or [])
+        filled_count = sum(1 for v in rule_data.values() if v != "N/A")
+        rule_confidence = filled_count / len(rule_data) if rule_data else 0.3
+        
+        print(f"规则引擎提取完成: {json.dumps(rule_data, ensure_ascii=False)}, 置信度: {rule_confidence:.2f}")
         return ModelExtractOutput(
-            structured_data={"error": str(e)},
-            confidence=0.0,
-            missing_fields=[]
+            structured_data=rule_data,
+            confidence=rule_confidence,
+            missing_fields=[f for f in rule_data if rule_data[f] == "N/A"]
         )

@@ -74,26 +74,18 @@ class OCRResult:
 def use_tesseract_ocr(img: np.ndarray) -> OCRResult:
     """使用Tesseract OCR识别"""
     try:
-        # 图像预处理
+        # 图像预处理：锐化 + CLAHE（最佳中文识别预处理）
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         
-        # 自适应阈值增强
-        thresh = cv2.adaptiveThreshold(
-            gray, 255,
-            cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
-            cv2.THRESH_BINARY,
-            11, 2
-        )
+        # 高斯锐化
+        blur = cv2.GaussianBlur(gray, (0, 0), 3)
+        sharpened = cv2.addWeighted(gray, 1.5, blur, -0.5, 0)
         
-        # CLAHE增强
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        enhanced = clahe.apply(thresh)
+        # CLAHE对比度增强
+        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+        enhanced = clahe.apply(sharpened)
         
-        # 形态学操作去噪
-        kernel = np.ones((1, 1), np.uint8)
-        processed = cv2.morphologyEx(enhanced, cv2.MORPH_CLOSE, kernel)
-        
-        pil_img = Image.fromarray(processed)
+        pil_img = Image.fromarray(enhanced)
         
         # Tesseract配置：中文+英文
         config = '--psm 6 -l chi_sim+eng --oem 3'
