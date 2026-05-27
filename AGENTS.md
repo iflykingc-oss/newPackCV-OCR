@@ -61,16 +61,18 @@ PackCV-OCR/
 
 ## 节点清单
 
-| 节点名 | 文件位置 | 类型 | 功能描述 | 配置文件 |
-|-------|---------|------|---------|---------|
-| image_preprocess | `graphs/nodes/image_preprocess_node.py` | task | 图像预处理 | - |
-| ocr_recognize | `graphs/nodes/ocr_recognize_node.py` | task | OCR识别 | - |
-| intelligent_correction | `graphs/nodes/intelligent_correction_node.py` | agent | 智能纠错 | `config/correction_llm_cfg.json` |
-| structure_parse | `graphs/nodes/structure_parse_node.py` | task | 结构化提取 | - |
-| semantic_qa | `graphs/nodes/semantic_qa_node.py` | agent | 语义问答 | `config/qa_llm_cfg.json` |
-| cv_detection | `graphs/nodes/cv_detection_node.py` | task | 目标检测 | - |
-| alert_engine | `graphs/nodes/alert_engine_node.py` | task | 告警引擎 | - |
-| report_generation | `graphs/nodes/report_generation_node.py` | task | 报表生成 | - |
+| 节点名 | 文件位置 | 类型 | 功能描述 | 分支逻辑 | 配置文件 |
+|-------|---------|------|---------|---------|---------|
+| route_processing | `graphs/graph.py` | task | 路由处理模式（单图/批量） | single→image_preprocess, batch→batch_process | - |
+| batch_process | `graphs/nodes/batch_process_node.py` | task | 批量图片处理 | - | - |
+| image_preprocess | `graphs/nodes/image_preprocess_node.py` | task | 图像预处理（去噪/增强/校正） | - | - |
+| ocr_recognize | `graphs/nodes/ocr_recognize_node.py` | task | Tesseract OCR识别（中文+英文） | - | - |
+| correct_text | `graphs/nodes/correct_text_node.py` | agent | LLM智能纠错 | - | `config/correct_text_llm_cfg.json` |
+| model_extract | `graphs/nodes/model_extract_node.py` | agent | LLM结构化提取 + 规则引擎降级 | - | `config/model_extract_llm_cfg.json` |
+| qa_answer | `graphs/nodes/qa_answer_node.py` | agent | 语义问答 | - | `config/qa_answer_llm_cfg.json` |
+| result_output | `graphs/nodes/result_output_node.py` | task | 结果输出（JSON/Excel/PDF+平台推送） | - | - |
+| cv_detection | `graphs/nodes/cv_detection_node.py` | task | YOLO目标检测（PackCV场景） | - | - |
+| report_generation | `graphs/nodes/report_generation_node.py` | task | 报表生成（效期/库存/合规） | - | - |
 
 **类型说明**: task(任务节点) / agent(大模型) / condition(条件分支) / looparray(列表循环) / loopcond(条件循环)
 
