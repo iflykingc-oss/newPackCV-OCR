@@ -99,7 +99,7 @@ def generate_expiry_report(expiry_data: List[Dict[str, Any]], alerts: List[Dict[
     try:
         import pandas as pd
         import tempfile
-        from coze_coding_dev_sdk.s3 import S3SyncStorage
+        from storage.oss import get_oss_storage
         
         # 准备数据
         report_data = []
@@ -144,7 +144,7 @@ def generate_expiry_report(expiry_data: List[Dict[str, Any]], alerts: List[Dict[
             return generate_pdf_report(df, 'expiry')
         
         # 上传到对象存储
-        storage = S3SyncStorage()
+        storage = get_oss_storage()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         object_name = f"reports/expiry_report_{timestamp}.xlsx"
         url = storage.upload_file(temp_path, object_name)
@@ -168,7 +168,7 @@ def generate_inventory_report(quantity_stats: Dict[str, Any], alerts: List[Dict[
     try:
         import pandas as pd
         import tempfile
-        from coze_coding_dev_sdk.s3 import S3SyncStorage
+        from storage.oss import get_oss_storage
         
         # 准备数据
         report_data = [
@@ -218,7 +218,7 @@ def generate_inventory_report(quantity_stats: Dict[str, Any], alerts: List[Dict[
             return generate_pdf_report(df, 'inventory')
         
         # 上传到对象存储
-        storage = S3SyncStorage()
+        storage = get_oss_storage()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         object_name = f"reports/inventory_report_{timestamp}.xlsx"
         url = storage.upload_file(temp_path, object_name)
@@ -247,7 +247,7 @@ def generate_compliance_report(
     try:
         import pandas as pd
         import tempfile
-        from coze_coding_dev_sdk.s3 import S3SyncStorage
+        from storage.oss import get_oss_storage
         
         # 准备数据
         report_data = []
@@ -315,7 +315,7 @@ def generate_compliance_report(
             return generate_pdf_report(df, 'compliance')
         
         # 上传到对象存储
-        storage = S3SyncStorage()
+        storage = get_oss_storage()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         object_name = f"reports/compliance_report_{timestamp}.xlsx"
         url = storage.upload_file(temp_path, object_name)
@@ -339,7 +339,7 @@ def generate_combined_report(reports: Dict[str, Any], export_format: str) -> Opt
     try:
         import pandas as pd
         import tempfile
-        from coze_coding_dev_sdk.s3 import S3SyncStorage
+        from storage.oss import get_oss_storage
         
         # 创建合并报表
         combined_data = []
@@ -365,7 +365,7 @@ def generate_combined_report(reports: Dict[str, Any], export_format: str) -> Opt
             return generate_pdf_report(df, 'combined')
         
         # 上传到对象存储
-        storage = S3SyncStorage()
+        storage = get_oss_storage()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         object_name = f"reports/combined_report_{timestamp}.xlsx"
         url = storage.upload_file(temp_path, object_name)
@@ -393,7 +393,7 @@ def generate_pdf_report(df, report_type: str) -> Optional[str]:
         from reportlab.platypus import SimpleDocTemplate, Table, TableStyle, Paragraph, PageBreak
         from reportlab.lib.styles import getSampleStyleSheet
         import tempfile
-        from coze_coding_dev_sdk.s3 import S3SyncStorage
+        from storage.oss import get_oss_storage
         
         # 保存到临时文件
         with tempfile.NamedTemporaryFile(mode='wb', suffix='.pdf', delete=False) as f:
@@ -436,7 +436,7 @@ def generate_pdf_report(df, report_type: str) -> Optional[str]:
             doc.build(story)
         
         # 上传到对象存储
-        storage = S3SyncStorage()
+        storage = get_oss_storage()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         object_name = f"reports/{report_type}_report_{timestamp}.pdf"
         url = storage.upload_file(temp_path, object_name)

@@ -13,13 +13,13 @@ from datetime import datetime
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from coze_coding_utils.runtime_ctx.context import Context
-from coze_coding_dev_sdk.s3 import S3SyncStorage
 
 import cv2
 import numpy as np
 
 from graphs.state import ImagePreprocessInput, ImagePreprocessOutput
 from utils.file.file import File, FileOps
+from storage.oss import get_oss_storage
 
 
 def _upload_image_to_storage(image_array: np.ndarray, file_name: str) -> str:
@@ -29,13 +29,7 @@ def _upload_image_to_storage(image_array: np.ndarray, file_name: str) -> str:
         if not is_success:
             raise Exception("图片编码失败")
 
-        storage = S3SyncStorage(
-            endpoint_url=os.getenv("COZE_BUCKET_ENDPOINT_URL"),
-            access_key="",
-            secret_key="",
-            bucket_name=os.getenv("COZE_BUCKET_NAME"),
-            region="cn-beijing",
-        )
+        storage = get_oss_storage()
         image_bytes = buffer.tobytes()
         key = storage.upload_file(
             file_content=image_bytes,
@@ -60,10 +54,10 @@ def image_preprocess_node(
     integrations: OpenCV
     """
     ctx = runtime.context
-    
+
     # 获取图片路径
     image_url = state.package_image.url
-    
+
     # 如果是URL，先下载到临时目录
     local_path = None
     if image_url.startswith("http://") or image_url.startswith("https://"):
@@ -79,18 +73,18 @@ def image_preprocess_node(
             local_path = image_url
     else:
         local_path = image_url
-    
+
     # 使用OpenCV进行图像预处理
     try:
         # 读取图片
         img = cv2.imread(local_path)
         if img is None:
             raise Exception(f"无法读取图片: {local_path}")
-        
+
         processing_info = {}
         is_rotated = False
         is_enhanced = False
-        
+
         # 1. 图像增强（提升对比度、亮度）- 使用CLAHE
         lab = cv2.cvtColor(img, cv2.COLOR_BGR2LAB)
         l, a, b = cv2.split(lab)
@@ -100,42 +94,41 @@ def image_preprocess_node(
         enhanced = cv2.cvtColor(enhanced, cv2.COLOR_LAB2BGR)
         is_enhanced = True
         processing_info["enhanced"] = True
-        
+
         # 2. 去噪（针对瓶子包装的噪点）
         denoised = cv2.fastNlMeansDenoisingColored(enhanced, None, 10, 10, 7, 21)
         processing_info["denoised"] = True
-        
+
         # 3. 边缘增强（针对小字体喷码）
         kernel_sharpen = np.array([[-1, -1, -1],
                                    [-1,  9, -1],
                                    [-1, -1, -1]])
         sharpened = cv2.filter2D(denoised, -1, kernel_sharpen)
         processing_info["sharpened"] = True
-        
-        # 注意：不再将图像转为二值图，PaddleOCR等引擎需要彩色或灰度图
-        # 保存增强后的彩色图（而非二值图），以获得更好的OCR效果
+
+        # 保存增强后的彩色图
         processed_image = sharpened
-        
+
         # 上传到对象存储
         file_name = f"preprocessed/preprocess_{datetime.now().strftime('%Y%m%d_%H%M%S')}.jpg"
         processed_url = _upload_image_to_storage(processed_image, file_name)
-        
+
         # 创建File对象
         processed_file = File(url=processed_url, file_type="image")
-        
+
         processing_info["original_size"] = f"{img.shape[1]}x{img.shape[0]}"
         processing_info["output_size"] = f"{processed_image.shape[1]}x{processed_image.shape[0]}"
         processing_info["processing_steps"] = ["enhance", "denoise", "sharpen"]
-        
+
         print(f"[图片预处理] 完成: {processing_info}")
-        
+
         return ImagePreprocessOutput(
             preprocessed_image=processed_file,
             is_rotated=is_rotated,
             is_enhanced=is_enhanced,
             processing_info=processing_info
         )
-        
+
     except Exception as e:
         # 如果OpenCV不可用或处理失败，返回原图
         print(f"[图片预处理] 失败，使用原图: {e}")

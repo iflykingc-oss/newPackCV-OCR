@@ -15,6 +15,7 @@ from langgraph.runtime import Runtime
 from coze_coding_utils.runtime_ctx.context import Context
 from graphs.state import ModelExtractInput, ModelExtractOutput
 from langchain_core.messages import SystemMessage, HumanMessage
+from coze_coding_dev_sdk import LLMClient
 
 
 def rule_based_extract(ocr_text: str, template_fields: List[str]) -> Dict[str, Any]:
@@ -23,7 +24,7 @@ def rule_based_extract(ocr_text: str, template_fields: List[str]) -> Dict[str, A
     使用正则表达式从OCR文本中提取关键字段
     """
     result = {}
-    
+
     # 定义提取规则
     rules = {
         "brand": [
@@ -64,14 +65,14 @@ def rule_based_extract(ocr_text: str, template_fields: List[str]) -> Dict[str, A
             r"(?:生产许可证|许可证|SC编号|食品生产许可证)[：:]\s*([A-Za-z0-9\-]+)",
         ],
     }
-    
+
     for field, patterns in rules.items():
         for pattern in patterns:
             match = re.search(pattern, ocr_text)
             if match:
                 result[field] = match.group(1).strip()
                 break
-    
+
     # 如果template_fields指定了，只返回指定字段
     if template_fields:
         for field in template_fields:
@@ -87,7 +88,7 @@ def rule_based_extract(ocr_text: str, template_fields: List[str]) -> Dict[str, A
         for field in rules:
             if field not in default_fields and field in result:
                 result[field] = result[field]
-    
+
     return result
 
 
@@ -102,57 +103,67 @@ def model_extract_node(
     integrations: 大语言模型
     """
     ctx = runtime.context
-    
+
     try:
         # 加载模型配置
         cfg_file = os.path.join(os.getenv("COZE_WORKSPACE_PATH"), config['metadata']['llm_cfg'])
         with open(cfg_file, 'r', encoding='utf-8') as f:
             _cfg = json.load(f)
-        
+
         llm_config = _cfg.get("config", {})
         sp = _cfg.get("sp", "")
         up_tpl = Template(_cfg.get("up", ""))
-        
+
         # 处理多种输入字段名（兼容性）
         ocr_text = state.ocr_text or state.raw_text or state.ocr_raw_result or ""
-        
+
         # 使用自定义提示词或默认提示词
         user_prompt = state.custom_prompt if state.custom_prompt else up_tpl.render({
             "ocr_text": ocr_text,
             "fields": json.dumps(state.template_fields, ensure_ascii=False) if state.template_fields else ""
         })
-        
+
         # 构造消息
         messages = [
             SystemMessage(content=sp),
             HumanMessage(content=user_prompt)
         ]
-        
+
         # 初始化并调用模型
-        from coze_coding_dev_sdk.llm import LLMClient
-        
-        client = LLMClient()
-        
+        client = LLMClient(ctx=ctx)
+
         # 设置模型参数
         model_params = {
             "model": llm_config.get("model", state.model_name),
             "temperature": llm_config.get("temperature", 0.1),
             "max_tokens": llm_config.get("max_completion_tokens", 2000),
         }
-        
+
         response = client.invoke(
             messages=messages,
             **model_params
         )
-        
-        # 解析响应
-        result_text = response.content if hasattr(response, 'content') else str(response)
-        
+
+        # 解析响应 - 安全获取文本内容
+        result_text = ""
+        if response and hasattr(response, 'content'):
+            content = response.content
+            if isinstance(content, str):
+                result_text = content
+            elif isinstance(content, list):
+                if content and isinstance(content[0], str):
+                    result_text = " ".join(content)
+                else:
+                    text_parts = [item.get("text", "") for item in content if isinstance(item, dict) and item.get("type") == "text"]
+                    result_text = " ".join(text_parts).strip()
+            else:
+                result_text = str(content)
+
         # 尝试解析JSON
         structured_data = {}
         confidence = 0.0
         missing_fields = []
-        
+
         try:
             # 提取JSON部分
             json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
@@ -160,7 +171,7 @@ def model_extract_node(
                 structured_data = json.loads(json_match.group())
             else:
                 structured_data = json.loads(result_text)
-            
+
             # 计算置信度（基于字段完整性）
             if state.template_fields:
                 filled_fields = [f for f in state.template_fields if f in structured_data and structured_data[f]]
@@ -168,28 +179,28 @@ def model_extract_node(
                 confidence = len(filled_fields) / len(state.template_fields) if state.template_fields else 1.0
             else:
                 confidence = 0.8  # 默认置信度
-                
+
         except json.JSONDecodeError as e:
             print(f"JSON解析失败，尝试文本提取: {str(e)}")
             # 如果JSON解析失败，尝试从文本中提取键值对
             structured_data = {"raw_extract": result_text}
             confidence = 0.5
-        
+
         print(f"结构化提取完成，置信度: {confidence:.2f}")
-        
+
         return ModelExtractOutput(
             structured_data=structured_data,
             confidence=confidence,
             missing_fields=missing_fields
         )
-        
+
     except Exception as e:
         print(f"模型结构化提取失败: {str(e)}，降级到规则引擎")
         # 降级到规则引擎
         rule_data = rule_based_extract(ocr_text, state.template_fields or [])
         filled_count = sum(1 for v in rule_data.values() if v != "N/A")
         rule_confidence = filled_count / len(rule_data) if rule_data else 0.3
-        
+
         print(f"规则引擎提取完成: {json.dumps(rule_data, ensure_ascii=False)}, 置信度: {rule_confidence:.2f}")
         return ModelExtractOutput(
             structured_data=rule_data,

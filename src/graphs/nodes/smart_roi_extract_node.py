@@ -12,7 +12,7 @@ from datetime import datetime
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from coze_coding_utils.runtime_ctx.context import Context
-from coze_coding_dev_sdk.s3 import S3SyncStorage
+from storage.oss import get_oss_storage
 
 import cv2
 import numpy as np
@@ -44,13 +44,7 @@ def _upload_image_to_storage(image_array: np.ndarray, file_name: str) -> str:
         if not is_success:
             raise Exception("图片编码失败")
 
-        storage = S3SyncStorage(
-            endpoint_url=os.getenv("COZE_BUCKET_ENDPOINT_URL"),
-            access_key="",
-            secret_key="",
-            bucket_name=os.getenv("COZE_BUCKET_NAME"),
-            region="cn-beijing",
-        )
+        storage = get_oss_storage()
         image_bytes = buffer.tobytes()
         key = storage.upload_file(
             file_content=image_bytes,

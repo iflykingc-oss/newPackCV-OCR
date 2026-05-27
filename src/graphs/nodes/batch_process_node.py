@@ -40,7 +40,7 @@ def batch_process_node(state: BatchProcessInput, config: RunnableConfig, runtime
         from io import BytesIO
         
         # 导入对象存储
-        from coze_coding_dev_sdk.s3 import S3SyncStorage
+        from storage.oss import get_oss_storage
         
         # 初始化OCR引擎
         ocr_engine = None
@@ -258,7 +258,7 @@ def export_batch_to_excel(results: list) -> str:
     """导出批量结果到Excel"""
     try:
         import pandas as pd
-        from coze_coding_dev_sdk.s3 import S3SyncStorage
+        from storage.oss import get_oss_storage
         
         # 准备数据
         data = []
@@ -281,7 +281,7 @@ def export_batch_to_excel(results: list) -> str:
             df.to_excel(f, index=False, engine='openpyxl')
         
         # 上传到对象存储
-        storage = S3SyncStorage()
+        storage = get_oss_storage()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         object_name = f"ocr/batch_results_{timestamp}.xlsx"
         url = storage.upload_file(temp_path, object_name)
@@ -307,7 +307,7 @@ def export_batch_to_pdf(results: list) -> str:
         from reportlab.lib import colors
         from reportlab.lib.units import cm
         from reportlab.platypus import SimpleDocTemplate, Table, TableStyle
-        from coze_coding_dev_sdk.s3 import S3SyncStorage
+        from storage.oss import get_oss_storage
         
         # 保存到临时文件
         with tempfile.NamedTemporaryFile(mode='wb', suffix='.pdf', delete=False) as f:
@@ -344,7 +344,7 @@ def export_batch_to_pdf(results: list) -> str:
             doc.build([table])
         
         # 上传到对象存储
-        storage = S3SyncStorage()
+        storage = get_oss_storage()
         timestamp = datetime.now().strftime("%Y%m%d_%H%M%S")
         object_name = f"ocr/batch_results_{timestamp}.pdf"
         url = storage.upload_file(temp_path, object_name)

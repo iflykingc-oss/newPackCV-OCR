@@ -12,7 +12,7 @@ from datetime import datetime
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from coze_coding_utils.runtime_ctx.context import Context
-from coze_coding_dev_sdk.s3 import S3SyncStorage
+from storage.oss import get_oss_storage
 
 import cv2
 import numpy as np
@@ -132,13 +132,7 @@ def download_image(image_url: str) -> Optional[bytes]:
 def save_roi_image(roi: np.ndarray, idx: int, obj_id: int) -> str:
     """保存ROI裁切图片到对象存储"""
     try:
-        storage = S3SyncStorage(
-            endpoint_url=os.getenv("COZE_BUCKET_ENDPOINT_URL"),
-            access_key="",
-            secret_key="",
-            bucket_name=os.getenv("COZE_BUCKET_NAME"),
-            region="cn-beijing",
-        )
+        storage = get_oss_storage()
 
         # 编码图片
         is_success, buffer = cv2.imencode('.jpg', roi, [cv2.IMWRITE_JPEG_QUALITY, 95])
