@@ -67,6 +67,8 @@ class GlobalState(BaseModel):
     # 输出数据
     final_result: Dict[str, Any] = Field(default_factory=dict, description="最终输出结果")
     export_file_url: Optional[str] = Field(default="", description="导出文件URL（TXT/PDF/Excel）")
+    answer: Optional[str] = Field(default="", description="语义问答答案")
+    platform_push_result: Optional[Dict[str, Any]] = Field(default_factory=dict, description="平台推送结果")
     success: bool = Field(default=True, description="是否成功")
     error_message: Optional[str] = Field(default=None, description="错误信息")
 

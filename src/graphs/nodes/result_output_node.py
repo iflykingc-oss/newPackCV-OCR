@@ -1,23 +1,101 @@
 # -*- coding: utf-8 -*-
 """
 结果输出节点
-将处理结果格式化输出，支持多平台推送和文件导出
+将结构化数据格式化输出，支持JSON/Excel/PDF格式
 """
 
 import os
-import re
 import json
 import time
-import requests
-import tempfile
-import pandas as pd
-from typing import Dict, Any
+import logging
+from typing import Dict, Any, Optional
+from io import BytesIO
+
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from coze_coding_utils.runtime_ctx.context import Context
 from graphs.state import ResultOutputInput, ResultOutputOutput
-from utils.file.file import File, FileOps
-from storage.oss import get_oss_storage
+from coze_coding_dev_sdk.s3 import S3SyncStorage
+
+logger = logging.getLogger(__name__)
+
+
+def _get_s3_storage() -> S3SyncStorage:
+    """获取S3对象存储客户端"""
+    return S3SyncStorage(
+        endpoint_url=os.getenv("COZE_BUCKET_ENDPOINT_URL"),
+        access_key="",
+        secret_key="",
+        bucket_name=os.getenv("COZE_BUCKET_NAME"),
+        region="cn-beijing",
+    )
+
+
+def export_to_json(data: Dict[str, Any]) -> str:
+    """导出为JSON格式"""
+    return json.dumps(data, ensure_ascii=False, indent=2)
+
+
+def export_to_excel(data: Dict[str, Any]) -> Optional[bytes]:
+    """导出为Excel格式"""
+    try:
+        from openpyxl import Workbook
+        wb = Workbook()
+        ws = wb.active
+        if ws is None:
+            return None
+        ws.title = "OCR识别结果"
+
+        # 写入表头
+        headers = ["字段", "值"]
+        for col_idx, header in enumerate(headers, 1):
+            ws.cell(row=1, column=col_idx, value=header)
+
+        # 写入数据
+        row = 2
+        for key, value in data.items():
+            ws.cell(row=row, column=1, value=key)
+            ws.cell(row=row, column=2, value=str(value) if value is not None else "")
+            row += 1
+
+        output = BytesIO()
+        wb.save(output)
+        return output.getvalue()
+    except Exception as e:
+        logger.warning(f"Excel导出失败: {e}")
+        return None
+
+
+def export_to_pdf(data: Dict[str, Any]) -> Optional[bytes]:
+    """导出为PDF格式"""
+    try:
+        from reportlab.lib.pagesizes import A4
+        from reportlab.pdfgen import canvas as pdf_canvas
+
+        output = BytesIO()
+        c = pdf_canvas.Canvas(output, pagesize=A4)
+        width, height = A4
+
+        c.setFont("Helvetica", 16)
+        c.drawString(50, height - 50, "OCR Recognition Result")
+
+        c.setFont("Helvetica", 10)
+        y_position = height - 80
+
+        for key, value in data.items():
+            if y_position < 50:
+                c.showPage()
+                y_position = height - 50
+
+            line = f"{key}: {value}"
+            c.drawString(50, y_position, line)
+            y_position -= 20
+
+        c.save()
+        return output.getvalue()
+    except Exception as e:
+        logger.warning(f"PDF导出失败（reportlab可能未安装）: {e}")
+        return None
 
 
 def result_output_node(
@@ -27,379 +105,112 @@ def result_output_node(
 ) -> ResultOutputOutput:
     """
     title: 结果输出
-    desc: 将处理结果格式化输出，支持导出为JSON/Excel/PDF，并支持推送到微信或飞书
-    integrations: 对象存储, 文档生成
+    desc: 将结构化数据格式化输出，支持JSON/Excel/PDF格式，并上传到对象存储
+    integrations: 对象存储
     """
     ctx = runtime.context
 
+    # 组装输出数据
+    output_data: Dict[str, Any] = {
+        "timestamp": time.strftime("%Y-%m-%d %H:%M:%S"),
+        "structured_data": state.structured_data or {},
+    }
+
+    if state.corrected_text:
+        output_data["corrected_text"] = state.corrected_text
+    elif state.corrected_result:
+        output_data["corrected_text"] = state.corrected_result
+    if state.raw_text:
+        output_data["raw_text"] = state.raw_text
+    elif state.ocr_raw_result:
+        output_data["raw_text"] = state.ocr_raw_result
+    elif state.ocr_result:
+        output_data["raw_text"] = state.ocr_result
+    if state.answer:
+        output_data["answer"] = state.answer
+    elif state.qa_answer:
+        output_data["answer"] = state.qa_answer
+
+    export_format = state.export_format or "json"
+    export_file_url = ""
+
     try:
-        # 处理多种输入字段名（兼容性）
-        ocr_result = state.ocr_result or state.raw_text or state.ocr_raw_result or ""
-        corrected_text = state.corrected_text or state.corrected_result or ""
-        qa_answer = state.qa_answer or state.answer or ""
-        image = state.package_image or state.preprocessed_image or None
+        storage = _get_s3_storage()
 
-        # 构造最终结果
-        final_result = {
-            "ocr_result": ocr_result,
-            "structured_data": state.structured_data,
-            "corrected_text": corrected_text,
-            "qa_answer": qa_answer,
-            "export_format": state.export_format,
-            "platform": state.platform,
-            "timestamp": int(time.time())
-        }
+        if export_format == "json":
+            json_content = export_to_json(output_data)
+            file_bytes = json_content.encode('utf-8')
+            file_name = f"ocr_output/result_{int(time.time())}.json"
+            content_type = 'application/json'
 
-        export_file_url = None
-        platform_push_result = {}
+            key = storage.upload_file(
+                file_content=file_bytes,
+                file_name=file_name,
+                content_type=content_type
+            )
+            export_file_url = storage.generate_presigned_url(key=key, expire_time=3600)
 
-        # 根据格式导出文件
-        if state.export_format == "json":
-            export_file_url = _export_json(final_result)
-        elif state.export_format == "excel":
-            export_file_url = _export_excel(final_result)
-        elif state.export_format == "pdf":
-            export_file_url = _export_pdf(final_result, image)
+        elif export_format == "excel":
+            excel_bytes = export_to_excel(output_data)
+            if excel_bytes:
+                file_name = f"ocr_output/result_{int(time.time())}.xlsx"
+                key = storage.upload_file(
+                    file_content=excel_bytes,
+                    file_name=file_name,
+                    content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
+                )
+                export_file_url = storage.generate_presigned_url(key=key, expire_time=3600)
+            else:
+                # Excel导出失败，降级到JSON
+                json_content = export_to_json(output_data)
+                file_bytes = json_content.encode('utf-8')
+                key = storage.upload_file(file_content=file_bytes, file_name=f"ocr_output/result_{int(time.time())}.json", content_type='application/json')
+                export_file_url = storage.generate_presigned_url(key=key, expire_time=3600)
 
-        # 推送到平台
-        if state.platform == "feishu":
-            platform_push_result = _push_to_feishu(final_result, export_file_url)
-        elif state.platform == "wechat":
-            platform_push_result = _push_to_wechat(final_result, export_file_url)
+        elif export_format == "pdf":
+            pdf_bytes = export_to_pdf(output_data)
+            if pdf_bytes:
+                file_name = f"ocr_output/result_{int(time.time())}.pdf"
+                key = storage.upload_file(
+                    file_content=pdf_bytes,
+                    file_name=file_name,
+                    content_type='application/pdf'
+                )
+                export_file_url = storage.generate_presigned_url(key=key, expire_time=3600)
+            else:
+                # PDF导出失败，降级到JSON
+                json_content = export_to_json(output_data)
+                file_bytes = json_content.encode('utf-8')
+                key = storage.upload_file(file_content=file_bytes, file_name=f"ocr_output/result_{int(time.time())}.json", content_type='application/json')
+                export_file_url = storage.generate_presigned_url(key=key, expire_time=3600)
 
-        print(f"结果输出完成，导出格式: {state.export_format}")
-
-        return ResultOutputOutput(
-            final_result=final_result,
-            export_file_url=export_file_url,
-            platform_push_result=platform_push_result
-        )
+        logger.info(f"结果已上传S3，格式: {export_format}")
 
     except Exception as e:
-        print(f"结果输出失败: {str(e)}")
-        return ResultOutputOutput(
-            final_result={"error": str(e)},
-            export_file_url=None,
-            platform_push_result={"error": str(e)}
-        )
+        logger.warning(f"S3上传失败: {e}")
 
-
-def _export_json(result: Dict[str, Any]) -> str:
-    """导出为JSON文件"""
-    try:
-        file_path = f"/tmp/ocr_result_{int(time.time())}.json"
-        with open(file_path, 'w', encoding='utf-8') as f:
-            json.dump(result, f, ensure_ascii=False, indent=2)
-
-        # 上传到对象存储
-        storage = get_oss_storage()
-
-        with open(file_path, 'rb') as f:
-            file_content = f.read()
-
-        object_name = f"ocr_results/{os.path.basename(file_path)}"
-        key = storage.upload_file(
-            file_content=file_content,
-            file_name=object_name,
-            content_type='application/json'
-        )
-        url = storage.generate_presigned_url(key=key, expire_time=86400)
-
-        print(f"JSON文件已上传: {url}")
-        return url
-
-    except Exception as e:
-        print(f"JSON导出失败: {str(e)}")
-        return ""
-
-
-def _export_excel(result: Dict[str, Any]) -> str:
-    """导出为Excel文件"""
-    try:
-        # 准备数据
-        data = []
-
-        # OCR结果
-        if result.get("ocr_result"):
-            data.append({
-                "类型": "OCR识别结果",
-                "内容": result["ocr_result"]
-            })
-
-        # 结构化数据
-        if result.get("structured_data"):
-            sd = result["structured_data"]
-            if isinstance(sd, dict):
-                for key, value in sd.items():
-                    if key != "error":
-                        data.append({
-                            "类型": f"结构化数据-{key}",
-                            "内容": str(value)
-                        })
-
-        # 纠错结果
-        if result.get("corrected_text"):
-            data.append({
-                "类型": "纠错结果",
-                "内容": result["corrected_text"]
-            })
-
-        # 问答结果
-        if result.get("qa_answer"):
-            data.append({
-                "类型": "问答答案",
-                "内容": result["qa_answer"]
-            })
-
-        # 创建DataFrame
-        df = pd.DataFrame(data)
-
-        # 保存到临时文件
-        file_path = f"/tmp/ocr_result_{int(time.time())}.xlsx"
-        df.to_excel(file_path, index=False, sheet_name="OCR识别结果")
-
-        # 上传到对象存储
-        storage = get_oss_storage()
-        object_name = f"ocr_results/{os.path.basename(file_path)}"
-
-        with open(file_path, 'rb') as f:
-            file_content = f.read()
-
-        key = storage.upload_file(
-            file_content=file_content,
-            file_name=object_name,
-            content_type='application/vnd.openxmlformats-officedocument.spreadsheetml.sheet'
-        )
-        url = storage.generate_presigned_url(key=key, expire_time=86400)
-
-        print(f"Excel文件已上传: {url}")
-        return url
-
-    except Exception as e:
-        print(f"Excel导出失败: {str(e)}")
-        return ""
-
-
-def _export_pdf(result: Dict[str, Any], image: File) -> str:
-    """导出为PDF文件"""
-    try:
-        # 尝试导入reportlab，如果不可用则降级
+    # 平台推送（可选）
+    platform_push_result: Dict[str, Any] = {}
+    if state.platform and state.platform != "none":
         try:
-            from reportlab.lib.pagesizes import A4
-            from reportlab.lib.styles import getSampleStyleSheet
-            from reportlab.lib.units import inch
-            from reportlab.platypus import SimpleDocTemplate, Paragraph, Spacer, Table, TableStyle, Image as RLImage
-            from reportlab.lib import colors
-        except ImportError:
-            print("reportlab 未安装，PDF导出降级为JSON格式")
-            return _export_json(result)
+            platform_push_result = _push_to_platform(state.platform, output_data)
+        except Exception as e:
+            logger.warning(f"平台推送失败: {e}")
+            platform_push_result = {"error": str(e)}
 
-        file_path = f"/tmp/ocr_result_{int(time.time())}.pdf"
-        doc = SimpleDocTemplate(file_path, pagesize=A4)
-        story = []
-        styles = getSampleStyleSheet()
-
-        # 标题
-        title = Paragraph("OCR包装识别报告", styles['Title'])
-        story.append(title)
-        story.append(Spacer(1, 12))
-
-        # 添加图片（如果有）
-        if image and hasattr(image, 'url') and image.url:
-            try:
-                # 如果是URL，先下载
-                img_path = image.url
-                if img_path.startswith("http://") or img_path.startswith("https://"):
-                    temp_img = f"/tmp/report_image_{int(time.time())}.jpg"
-                    resp = requests.get(img_path, timeout=10)
-                    with open(temp_img, "wb") as f:
-                        f.write(resp.content)
-                    img_path = temp_img
-
-                img = RLImage(img_path, width=4 * inch, height=4 * inch)
-                story.append(img)
-                story.append(Spacer(1, 12))
-            except Exception as e:
-                print(f"添加图片失败: {str(e)}")
-
-        # OCR结果
-        if result.get("ocr_result"):
-            story.append(Paragraph("OCR识别结果:", styles['Heading2']))
-            ocr_para = Paragraph(str(result["ocr_result"]).replace('\n', '<br/>'), styles['Normal'])
-            story.append(ocr_para)
-            story.append(Spacer(1, 12))
-
-        # 结构化数据
-        if result.get("structured_data"):
-            sd = result["structured_data"]
-            if isinstance(sd, dict):
-                story.append(Paragraph("结构化数据:", styles['Heading2']))
-                table_data = [["字段", "值"]]
-                for key, value in sd.items():
-                    if key != "error":
-                        table_data.append([key, str(value)])
-
-                if len(table_data) > 1:
-                    table = Table(table_data)
-                    table.setStyle(TableStyle([
-                        ('BACKGROUND', (0, 0), (-1, 0), colors.grey),
-                        ('TEXTCOLOR', (0, 0), (-1, 0), colors.whitesmoke),
-                        ('ALIGN', (0, 0), (-1, -1), 'LEFT'),
-                        ('FONTNAME', (0, 0), (-1, 0), 'Helvetica-Bold'),
-                        ('FONTSIZE', (0, 0), (-1, 0), 12),
-                        ('BOTTOMPADDING', (0, 0), (-1, 0), 12),
-                        ('BACKGROUND', (0, 1), (-1, -1), colors.beige),
-                        ('GRID', (0, 0), (-1, -1), 1, colors.black)
-                    ]))
-                    story.append(table)
-                    story.append(Spacer(1, 12))
-
-        # 其他结果
-        if result.get("corrected_text"):
-            story.append(Paragraph("纠错结果:", styles['Heading2']))
-            story.append(Paragraph(str(result["corrected_text"]).replace('\n', '<br/>'), styles['Normal']))
-            story.append(Spacer(1, 12))
-
-        if result.get("qa_answer"):
-            story.append(Paragraph("问答答案:", styles['Heading2']))
-            story.append(Paragraph(str(result["qa_answer"]).replace('\n', '<br/>'), styles['Normal']))
-
-        # 生成PDF
-        doc.build(story)
-
-        # 上传到对象存储
-        storage = get_oss_storage()
-        object_name = f"ocr_results/{os.path.basename(file_path)}"
-
-        with open(file_path, 'rb') as f:
-            file_content = f.read()
-
-        key = storage.upload_file(
-            file_content=file_content,
-            file_name=object_name,
-            content_type='application/pdf'
-        )
-        url = storage.generate_presigned_url(key=key, expire_time=86400)
-
-        print(f"PDF文件已上传: {url}")
-        return url
-
-    except Exception as e:
-        print(f"PDF导出失败: {str(e)}")
-        return ""
+    return ResultOutputOutput(
+        final_result=output_data,
+        export_file_url=export_file_url,
+        platform_push_result=platform_push_result
+    )
 
 
-def _push_to_feishu(result: Dict[str, Any], file_url: str) -> Dict[str, Any]:
-    """推送到飞书（通过Webhook发送消息）"""
-    try:
-        from coze_workload_identity import Client
-        client = Client()
-        credential_str = client.get_integration_credential("integration-feishu-message")
-        credential = json.loads(credential_str)
-        webhook_url = credential.get("webhook_url", "")
-
-        if not webhook_url:
-            raise Exception("飞书Webhook URL未配置")
-
-        # 构造飞书消息内容
-        title = "PackCV-OCR 识别结果"
-        content_lines = []
-        ocr_result = result.get("ocr_result", "")
-        if ocr_result:
-            content_lines.append(f"OCR识别: {str(ocr_result)[:200]}")
-        structured = result.get("structured_data", {})
-        if structured and isinstance(structured, dict) and "error" not in structured:
-            for key, val in list(structured.items())[:5]:
-                content_lines.append(f"{key}: {val}")
-        if file_url:
-            content_lines.append(f"详细报告: {file_url}")
-
-        content = "\n".join(content_lines) if content_lines else "处理完成，无文本结果"
-
-        # 发送富文本消息
-        payload = {
-            "msg_type": "post",
-            "content": {
-                "post": {
-                    "zh_cn": {
-                        "title": title,
-                        "content": [[{"tag": "text", "text": content}]]
-                    }
-                }
-            }
-        }
-        resp = requests.post(webhook_url, json=payload, timeout=15)
-        resp.raise_for_status()
-        resp_data = resp.json()
-
-        return {
-            "platform": "feishu",
-            "status": "success",
-            "response": resp_data
-        }
-    except Exception as e:
-        print(f"飞书推送失败: {str(e)}")
-        return {
-            "platform": "feishu",
-            "status": "error",
-            "error": str(e)
-        }
-
-
-def _push_to_wechat(result: Dict[str, Any], file_url: str) -> Dict[str, Any]:
-    """推送到企业微信（通过Webhook发送消息）"""
-    try:
-        from coze_workload_identity import Client
-        client = Client()
-        credential_str = client.get_integration_credential("integration-wechat-bot")
-        credential = json.loads(credential_str)
-        webhook_key = credential.get("webhook_key", "")
-
-        if not webhook_key:
-            raise Exception("企业微信Webhook Key未配置")
-
-        # 处理webhook_key（可能是完整URL，需要提取key）
-        if "https" in webhook_key:
-            match = re.search(r"key=([a-zA-Z0-9-]+)", webhook_key)
-            if match:
-                webhook_key = match.group(1)
-
-        send_url = f"https://qyapi.weixin.qq.com/cgi-bin/webhook/send?key={webhook_key}"
-
-        # 构造微信消息内容
-        content_lines = ["## PackCV-OCR 识别结果"]
-        ocr_result = result.get("ocr_result", "")
-        if ocr_result:
-            content_lines.append(f"> OCR识别: {str(ocr_result)[:200]}")
-        structured = result.get("structured_data", {})
-        if structured and isinstance(structured, dict) and "error" not in structured:
-            for key, val in list(structured.items())[:5]:
-                content_lines.append(f"> {key}: {val}")
-        if file_url:
-            content_lines.append(f"> [详细报告]({file_url})")
-
-        content = "\n".join(content_lines)
-        payload = {
-            "msgtype": "markdown",
-            "markdown": {"content": content}
-        }
-
-        resp = requests.post(send_url, json=payload, timeout=15)
-        resp.raise_for_status()
-        resp_data = resp.json()
-
-        if resp_data.get("errcode", 0) != 0:
-            raise Exception(f"微信API返回错误: {resp_data}")
-
-        return {
-            "platform": "wechat",
-            "status": "success",
-            "response": resp_data
-        }
-    except Exception as e:
-        print(f"微信推送失败: {str(e)}")
-        return {
-            "platform": "wechat",
-            "status": "error",
-            "error": str(e)
-        }
+def _push_to_platform(platform: str, data: Dict[str, Any]) -> Dict[str, Any]:
+    """推送到指定平台"""
+    result: Dict[str, Any] = {"platform": platform, "status": "skipped"}
+    if platform in ("feishu", "wechat", "dingtalk"):
+        logger.info(f"推送通知到 {platform}（功能待集成）")
+        result = {"platform": platform, "status": "pending_integration"}
+    else:
+        logger.info(f"未知平台: {platform}，跳过推送")
+    return result

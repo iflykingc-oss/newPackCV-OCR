@@ -15,23 +15,32 @@ import cv2
 import numpy as np
 from PIL import Image
 import pytesseract
-from pydantic import BaseModel, Field
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from coze_coding_utils.runtime_ctx.context import Context
+from graphs.state import OCRRecognizeInput, OCRRecognizeOutput
 from utils.file.file import File
-from storage.oss import OSSStorage
-from core.ocr.builtin_ocr import builtin_ocr
+from coze_coding_dev_sdk.s3 import S3SyncStorage
 
 logger = logging.getLogger(__name__)
+
+
+def _get_s3_storage() -> S3SyncStorage:
+    """获取S3对象存储客户端"""
+    return S3SyncStorage(
+        endpoint_url=os.getenv("COZE_BUCKET_ENDPOINT_URL"),
+        access_key="",
+        secret_key="",
+        bucket_name=os.getenv("COZE_BUCKET_NAME"),
+        region="cn-beijing",
+    )
 
 
 def download_image(url: str) -> Optional[np.ndarray]:
     """下载图片并转换为OpenCV格式"""
     try:
         if url.startswith('data:'):
-            # Base64编码的图片
             header, data = url.split(',', 1)
             img_bytes = BytesIO(data.encode())
             pil_img = Image.open(img_bytes)
@@ -39,7 +48,6 @@ def download_image(url: str) -> Optional[np.ndarray]:
             return img
         
         if url.startswith('http://') or url.startswith('https://'):
-            # 网络图片
             response = requests.get(url, timeout=30)
             if response.status_code != 200:
                 logger.error(f"下载图片失败: HTTP {response.status_code}")
@@ -48,7 +56,6 @@ def download_image(url: str) -> Optional[np.ndarray]:
             img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
             return img
         
-        # 本地文件
         if os.path.exists(url):
             img = cv2.imread(url)
             return img
@@ -62,7 +69,7 @@ def download_image(url: str) -> Optional[np.ndarray]:
 
 
 class OCRResult:
-    """OCR识别结果"""
+    """OCR识别结果内部数据结构"""
     def __init__(self, raw_text: str, confidence: float, regions: List, engine: str, metadata: Dict):
         self.raw_text = raw_text
         self.confidence = confidence
@@ -74,7 +81,6 @@ class OCRResult:
 def use_tesseract_ocr(img: np.ndarray) -> OCRResult:
     """使用Tesseract OCR识别"""
     try:
-        # 图像预处理：锐化 + CLAHE（最佳中文识别预处理）
         gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
         
         # 高斯锐化
@@ -87,20 +93,13 @@ def use_tesseract_ocr(img: np.ndarray) -> OCRResult:
         
         pil_img = Image.fromarray(enhanced)
         
-        # Tesseract配置：中文+英文
         config = '--psm 6 -l chi_sim+eng --oem 3'
-        
-        # 识别文字
         text = pytesseract.image_to_string(pil_img, config=config)
-        
-        # 获取置信度
         data = pytesseract.image_to_data(pil_img, config=config, output_type=pytesseract.Output.DICT)
         
-        # 计算平均置信度
         confidences = [int(conf) for conf in data['conf'] if int(conf) > 0]
         avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
         
-        # 构建regions
         regions = []
         n_boxes = len(data['text'])
         for i in range(n_boxes):
@@ -116,7 +115,6 @@ def use_tesseract_ocr(img: np.ndarray) -> OCRResult:
                     }
                 })
         
-        # 清理文本
         text = text.strip()
         
         result = OCRResult(
@@ -147,14 +145,13 @@ def use_tesseract_ocr(img: np.ndarray) -> OCRResult:
 def use_builtin_ocr(img: np.ndarray) -> OCRResult:
     """使用内嵌OCR（备用方案）"""
     try:
-        # 保存临时文件
+        from core.ocr.builtin_ocr import builtin_ocr
+        
         temp_path = '/tmp/builtin_ocr_input.jpg'
         cv2.imwrite(temp_path, img)
         
-        # 使用内嵌OCR
         result = builtin_ocr(temp_path)
         
-        # 检查结果是否有效
         if result is None:
             return OCRResult(
                 raw_text="",
@@ -164,7 +161,6 @@ def use_builtin_ocr(img: np.ndarray) -> OCRResult:
                 metadata={'error': '引擎返回空结果'}
             )
         
-        # 构建regions
         regions_list = []
         if hasattr(result, 'raw_text') and result.raw_text:
             regions_list.append({
@@ -191,26 +187,6 @@ def use_builtin_ocr(img: np.ndarray) -> OCRResult:
         )
 
 
-class OCRRecognizeInput(BaseModel):
-    """OCR识别输入"""
-    package_image: File = Field(..., description="待识别的图片")
-    preprocessed_image: Optional[File] = Field(default=None, description="预处理后的图片")
-    is_enhanced: bool = Field(default=False, description="是否已预处理增强")
-    ocr_engine_type: str = Field(default="builtin", description="OCR引擎类型")
-
-
-class OCRRecognizeOutput(BaseModel):
-    """OCR识别输出"""
-    ocr_raw_result: str = Field(default="", description="OCR原始识别结果")
-    raw_text: str = Field(default="", description="识别出的文本")
-    ocr_confidence: float = Field(default=0.0, description="OCR置信度")
-    confidence: float = Field(default=0.0, description="整体置信度")
-    ocr_regions: List = Field(default_factory=list, description="OCR区域列表")
-    regions: List = Field(default_factory=list, description="文本区域列表")
-    engine_used: str = Field(default="", description="使用的OCR引擎")
-    processing_time: float = Field(default=0.0, description="处理耗时(秒)")
-
-
 def ocr_recognize_node(
     state: OCRRecognizeInput,
     config: RunnableConfig,
@@ -224,11 +200,28 @@ def ocr_recognize_node(
     ctx = runtime.context
     start_time = time.time()
     
-    logger.info(f"开始OCR识别: {state.package_image.url}")
+    logger.info(f"开始OCR识别: {state.package_image.url if state.package_image else 'no image'}")
     
     try:
+        # 选择图片：优先使用预处理后的图片
+        image_url = ""
+        if state.preprocessed_image and state.preprocessed_image.url:
+            image_url = state.preprocessed_image.url
+        elif state.package_image and state.package_image.url:
+            image_url = state.package_image.url
+        elif state.image and state.image.url:
+            image_url = state.image.url
+        else:
+            logger.error("无可用图片")
+            return OCRRecognizeOutput(
+                raw_text="",
+                ocr_confidence=0.0,
+                engine_used="none",
+                processing_time=time.time() - start_time
+            )
+        
         # 下载图片
-        img = download_image(state.package_image.url)
+        img = download_image(image_url)
         if img is None:
             return OCRRecognizeOutput(
                 raw_text="",
@@ -251,10 +244,9 @@ def ocr_recognize_node(
         logger.info(f"OCR识别完成，耗时: {elapsed_time:.2f}秒")
         logger.info(f"识别文本: {result.raw_text[:200] if result.raw_text else '(empty)'}...")
         
-        # 上传结果到OSS（失败不影响返回结果）
-        export_url = ""
+        # 上传结果到S3（失败不影响返回结果）
         try:
-            oss = OSSStorage()
+            storage = _get_s3_storage()
             result_data = {
                 "raw_text": result.raw_text,
                 "confidence": result.confidence,
@@ -266,14 +258,21 @@ def ocr_recognize_node(
             result_bytes = result_json.encode('utf-8')
             
             file_name = f"ocr_results/ocr_result_{int(time.time())}.json"
-            oss.upload_file(result_bytes, file_name, 'application/json')
-            export_url = oss.generate_presigned_url(file_name, expire_time=3600)
+            key = storage.upload_file(
+                file_content=result_bytes,
+                file_name=file_name,
+                content_type='application/json'
+            )
+            export_url = storage.generate_presigned_url(key=key, expire_time=3600)
+            logger.info(f"OCR结果已上传S3: {key}")
         except Exception as upload_err:
-            logger.warning(f"OSS上传失败，不影响结果返回: {upload_err}")
+            logger.warning(f"S3上传失败，不影响结果返回: {upload_err}")
         
         return OCRRecognizeOutput(
+            ocr_raw_result=result.raw_text,
             raw_text=result.raw_text,
             ocr_confidence=result.confidence,
+            confidence=result.confidence,
             ocr_regions=result.regions,
             regions=result.regions,
             engine_used=result.engine,
@@ -283,8 +282,10 @@ def ocr_recognize_node(
     except Exception as e:
         logger.error(f"OCR识别异常: {e}")
         return OCRRecognizeOutput(
+            ocr_raw_result="",
             raw_text="",
             ocr_confidence=0.0,
+            confidence=0.0,
             engine_used="error",
             processing_time=time.time() - start_time
         )

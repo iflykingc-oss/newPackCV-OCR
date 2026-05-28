@@ -30,6 +30,9 @@ def correct_text_node(
     """
     ctx = runtime.context
 
+    # 安全获取ocr_text（防止None）
+    ocr_text = state.ocr_text or state.raw_text or state.ocr_raw_result or ""
+
     try:
         # 加载模型配置
         cfg_file = os.path.join(os.getenv("COZE_WORKSPACE_PATH"), config['metadata']['llm_cfg'])
@@ -39,9 +42,6 @@ def correct_text_node(
         llm_config = _cfg.get("config", {})
         sp = _cfg.get("sp", "")
         up_tpl = Template(_cfg.get("up", ""))
-
-        # 处理多种输入字段名（兼容性）
-        ocr_text = state.ocr_text or state.raw_text or state.ocr_raw_result or ""
 
         # 构造提示词
         correction_rules_str = json.dumps(state.correction_rules, ensure_ascii=False) if state.correction_rules else "无特殊规则"
@@ -83,8 +83,8 @@ def correct_text_node(
                 result_text = str(content)
 
         # 尝试解析纠错结果
-        corrected_text = state.ocr_text  # 默认返回原文
-        changes = []
+        corrected_text = ocr_text  # 默认返回原文
+        changes: List[Dict[str, Any]] = []
 
         try:
             json_match = re.search(r'\{.*\}', result_text, re.DOTALL)
@@ -99,7 +99,7 @@ def correct_text_node(
 
                 # 如果没有changes但有corrected_text，自动对比
                 if not changes and "corrected_text" in result:
-                    original_lines = state.ocr_text.split('\n')
+                    original_lines = ocr_text.split('\n')
                     corrected_lines = corrected_text.split('\n')
                     for i, (orig, corr) in enumerate(zip(original_lines, corrected_lines)):
                         if orig != corr:
@@ -109,12 +109,10 @@ def correct_text_node(
                                 "corrected": corr
                             })
             else:
-                # 如果无法解析JSON，直接使用返回文本作为纠错结果
                 corrected_text = result_text
-                # 简单对比
-                if state.ocr_text != corrected_text:
+                if ocr_text != corrected_text:
                     changes.append({
-                        "original": state.ocr_text,
+                        "original": ocr_text,
                         "corrected": corrected_text
                     })
 
@@ -134,8 +132,9 @@ def correct_text_node(
 
     except Exception as e:
         print(f"智能纠错失败: {str(e)}")
+        # 安全返回原文（ocr_text已在函数开头安全获取）
         return CorrectTextOutput(
-            corrected_text=state.ocr_text,
+            corrected_text=ocr_text,
             changes=[],
             correction_count=0
         )

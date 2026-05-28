@@ -1,14 +1,15 @@
 # -*- coding: utf-8 -*-
 """
 语义问答节点
-使用大语言模型基于OCR识别结果回答用户问题
+使用大语言模型对OCR结果进行问答分析
 """
 
 import os
 import re
 import json
 import time
-from typing import Dict, Any, List
+from jinja2 import Template
+from typing import Dict, Any
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from coze_coding_utils.runtime_ctx.context import Context
@@ -24,10 +25,14 @@ def qa_answer_node(
 ) -> QaAnswerOutput:
     """
     title: 语义问答
-    desc: 基于OCR识别结果和结构化数据，使用大语言模型回答用户问题
+    desc: 使用大语言模型对OCR识别结果进行语义问答分析
     integrations: 大语言模型
     """
     ctx = runtime.context
+
+    # 安全获取OCR文本
+    ocr_text = state.ocr_text or state.raw_text or state.ocr_raw_result or ""
+    question = state.user_question or "请分析这个产品的完整信息"
 
     try:
         # 加载模型配置
@@ -37,31 +42,19 @@ def qa_answer_node(
 
         llm_config = _cfg.get("config", {})
         sp = _cfg.get("sp", "")
-        up = _cfg.get("up", "")
+        up_tpl = Template(_cfg.get("up", ""))
 
-        # 构造上下文
-        context_parts = []
-
-        # 处理多种输入字段名（兼容性）
-        ocr_text = state.ocr_text or state.raw_text or state.ocr_raw_result or ""
-
-        # 添加OCR文本
-        if ocr_text:
-            context_parts.append(f"OCR识别文本：\n{ocr_text}\n")
-
-        # 添加结构化数据
-        if state.structured_data:
-            context_parts.append(f"结构化数据：\n{json.dumps(state.structured_data, ensure_ascii=False, indent=2)}\n")
-
-        context = "\n".join(context_parts)
-
-        # 构造用户消息
-        user_message = f"{up}\n\n上下文信息：\n{context}\n\n用户问题：{state.user_question}"
+        # 构造提示词
+        user_prompt = up_tpl.render({
+            "ocr_text": ocr_text,
+            "question": question,
+            "structured_data": json.dumps(state.structured_data, ensure_ascii=False) if state.structured_data else "无"
+        })
 
         # 构造消息
         messages = [
             SystemMessage(content=sp),
-            HumanMessage(content=user_message)
+            HumanMessage(content=user_prompt)
         ]
 
         # 初始化并调用模型
@@ -71,7 +64,7 @@ def qa_answer_node(
             messages=messages,
             model=llm_config.get("model", state.model_name),
             temperature=llm_config.get("temperature", 0.3),
-            max_tokens=llm_config.get("max_completion_tokens", 1500)
+            max_tokens=llm_config.get("max_completion_tokens", 2000)
         )
 
         # 解析响应 - 安全获取文本内容
@@ -89,28 +82,22 @@ def qa_answer_node(
             else:
                 answer = str(content)
 
-        # 提取参考来源（如果有）
-        references = []
-        if "参考" in answer or "来源" in answer:
-            ref_match = re.search(r'参考[:：](.+)', answer)
-            if ref_match:
-                references.append(ref_match.group(1).strip())
-
-        # 默认置信度
-        confidence = 0.85
-
-        print(f"语义问答完成，答案长度: {len(answer)}")
+        print(f"语义问答完成")
 
         return QaAnswerOutput(
             answer=answer,
-            confidence=confidence,
-            references=references
+            confidence=0.8
         )
 
     except Exception as e:
-        print(f"语义问答失败: {str(e)}")
+        error_msg = f"语义问答失败: {str(e)}"
+        print(error_msg)
+        # 降级到简单拼接
+        simple_answer = f"基于OCR文本的分析结果：\n{ocr_text}"
+        if state.structured_data:
+            simple_answer += f"\n\n结构化数据：\n{json.dumps(state.structured_data, ensure_ascii=False, indent=2)}"
+
         return QaAnswerOutput(
-            answer=f"抱歉，回答问题时出现错误: {str(e)}",
-            confidence=0.0,
-            references=[]
+            answer=simple_answer,
+            confidence=0.3
         )
