@@ -19,7 +19,7 @@ class GlobalState(BaseModel):
     images: Optional[List[File]] = Field(default=None, description="多张图片列表（批量处理）")
     processing_mode: Optional[str] = Field(default="single", description="处理模式：single（单图）或 batch（批量）")
     cv_model: Optional[str] = Field(default="yolov8", description="CV模型类型（PackCV-OCR）")
-    ocr_engine_type: Literal["builtin", "api", "tesseract"] = Field(default="builtin", description="OCR引擎类型")
+    ocr_engine_type: Literal["builtin", "api", "rapidocr", "paddleocr", "tesseract"] = Field(default="builtin", description="OCR引擎类型")
     ocr_api_config: Optional[Dict[str, Any]] = Field(default=None, description="OCR API配置")
     model_type: Literal["extract", "correct", "qa"] = Field(default="extract", description="模型调用类型")
     model_name: str = Field(default="doubao-seed-2-0-pro-260215", description="大模型名称")
@@ -79,7 +79,7 @@ class GraphInput(BaseModel):
     """工作流输入"""
     package_image: File = Field(..., description="上传的包装图片（单图处理）")
     images: Optional[List[File]] = Field(default=None, description="上传的图片列表（批量处理，优先级高于package_image）")
-    ocr_engine_type: Literal["builtin", "api"] = Field(default="builtin", description="OCR引擎类型：builtin（内置算法）或 api（外部API）")
+    ocr_engine_type: Literal["builtin", "api", "rapidocr"] = Field(default="builtin", description="OCR引擎类型：builtin（内置多引擎融合）、api（外部API）、rapidocr（ONNX引擎）")
     ocr_api_config: Optional[Dict[str, Any]] = Field(default=None, description="OCR API配置（当engine_type=api时使用）")
     model_type: Literal["extract", "correct", "qa"] = Field(default="extract", description="模型调用类型：extract（结构化提取）、correct（智能纠错）、qa（语义问答）")
     model_name: Optional[str] = Field(default="doubao-seed-2-0-pro-260215", description="使用的大模型名称")
@@ -113,7 +113,7 @@ class ImagePreprocessInput(BaseModel):
 
 class ImagePreprocessOutput(BaseModel):
     """图片预处理节点输出"""
-    preprocessed_image: File = Field(..., description="预处理后的图片")
+    preprocessed_image: Optional[File] = Field(default=None, description="预处理后的图片（失败时为None）")
     is_rotated: bool = Field(default=False, description="是否进行了旋转校正")
     is_enhanced: bool = Field(default=False, description="是否进行了图像增强")
     processing_info: Dict[str, Any] = Field(default_factory=dict, description="处理信息（角度、亮度等）")
@@ -126,7 +126,7 @@ class OCRRecognizeInput(BaseModel):
     image: Optional[File] = Field(default=None, description="待识别图片（可能是原始图或预处理图）")
     package_image: Optional[File] = Field(default=None, description="原始包装图片")
     preprocessed_image: Optional[File] = Field(default=None, description="预处理后的图片")
-    ocr_engine_type: Literal["builtin", "api"] = Field(default="builtin", description="OCR引擎类型")
+    ocr_engine_type: Literal["builtin", "api", "rapidocr", "paddleocr", "tesseract"] = Field(default="builtin", description="OCR引擎类型")
     ocr_api_config: Optional[Dict[str, Any]] = Field(default=None, description="OCR API配置")
 
 
@@ -258,7 +258,7 @@ class RouteProcessingOutput(BaseModel):
 class BatchProcessInput(BaseModel):
     """批量处理节点输入"""
     images: List[File] = Field(..., description="待处理的图片列表")
-    ocr_engine_type: Literal["builtin", "api", "tesseract"] = Field(default="builtin", description="OCR引擎类型")
+    ocr_engine_type: Literal["builtin", "api", "rapidocr", "paddleocr", "tesseract"] = Field(default="builtin", description="OCR引擎类型")
     ocr_api_config: Optional[Dict[str, Any]] = Field(default=None, description="OCR API配置")
     export_format: Literal["json", "excel", "pdf"] = Field(default="json", description="导出格式")
     model_type: Optional[Literal["extract", "correct", "qa"]] = Field(default=None, description="模型调用类型（可选）")

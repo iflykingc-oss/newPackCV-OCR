@@ -1,7 +1,8 @@
 # -*- coding: utf-8 -*-
 """
-多平台OCR包装识别系统 - 主图编排
-构建完整的DAG工作流，支持图片预处理、OCR识别、模型调用、结果输出、批量处理
+多平台OCR包装识别系统 - 主图编排 V2.0
+深度优化版：集成RapidOCR多引擎融合、增强预处理、增强规则提取
+串行DAG: route → image_preprocess → ocr_recognize → correct_text → model_extract → qa_answer → result_output
 """
 
 from typing import Optional
@@ -40,9 +41,6 @@ def route_processing_mode(state: GlobalState) -> str:
         return "批量处理"
     else:
         return "单图处理"
-
-
-# 删除 route_model_processing 函数，改为串行流程
 
 
 def route_processing_node(state: RouteProcessingInput, config: RunnableConfig, runtime: Runtime[Context]) -> RouteProcessingOutput:

@@ -1,63 +1,18 @@
 # PackCV-OCR 项目结构索引
 
 ## 项目概述
-- **名称**: PackCV-OCR
+- **名称**: PackCV-OCR V2.3
 - **功能**: 面向货架/包装场景的高精度OCR识别解决方案
+- **核心升级**: RapidOCR(ONNX)为主引擎 + Tesseract备选 + 增强中英文规则提取
 
 ### 核心特性
-- 多引擎OCR识别（Tesseract/EasyOCR/PaddleOCR）
-- YOLO目标检测与ROI裁切
-- 图像预处理增强
+- RapidOCR(ONNX)主引擎 + Tesseract备选（PaddleOCR已禁用-OneDNN兼容性问题）
+- 自动引擎降级与原始图像回退
+- 轻量级图像预处理（CLAHE增强+锐化，RapidOCR自带文本检测）
 - LLM智能纠错与结构化提取
+- 增强版规则引擎（11个字段、中英文双语支持、关联校验、到期日计算）
 - 效期检测与告警
 - 报表生成与导出
-
-## 目录结构
-
-```
-PackCV-OCR/
-├── config/                  # 配置文件
-├── assets/                  # 静态资源与测试图片
-├── scripts/                 # 运维脚本
-├── deploy/                  # 部署配置
-│   ├── Dockerfile           # Docker镜像
-│   ├── docker-compose.yml   # Docker Compose
-│   ├── k8s-deployment.yaml  # K8s部署
-│   └── nginx.conf           # Nginx配置
-├── docs/                    # 文档
-├── .github/workflows/       # CI/CD配置
-├── src/
-│   ├── core/               # 核心能力模块 ⭐
-│   │   ├── __init__.py     # 核心接口定义
-│   │   ├── cv/             # CV视觉层
-│   │   │   ├── detector.py     # YOLO检测器
-│   │   │   ├── preprocessor.py # 预处理算子
-│   │   │   └── cropper.py      # ROI裁切
-│   │   ├── ocr/            # OCR识别层
-│   │   │   └── ocr_scheduler.py # 多引擎调度器
-│   │   ├── llm/            # 融合决策层
-│   │   │   ├── decision_maker.py # LLM触发器
-│   │   │   └── prompts.py       # 提示词模板
-│   │   └── rule_engine/    # 规则引擎
-│   │       ├── validator.py    # 效期校验
-│   │       └── alert.py        # 告警管理
-│   ├── graphs/            # LangGraph工作流
-│   │   ├── state.py       # 状态定义
-│   │   ├── graph.py       # 主图编排
-│   │   ├── base/          # 基础组件
-│   │   │   └── base_graph.py
-│   │   └── nodes/         # 节点实现
-│   ├── storage/           # 存储层
-│   │   ├── oss.py         # 对象存储
-│   │   ├── db.py          # 数据库
-│   │   └── cache.py       # 缓存
-│   ├── api/               # HTTP API
-│   ├── cli/               # 命令行工具
-│   ├── utils/             # 工具函数
-│   │   └── performance.py # 性能优化
-│   └── tests/             # 测试套件
-└── README.md
-```
 
 ## 节点清单
 
@@ -65,96 +20,61 @@ PackCV-OCR/
 |-------|---------|------|---------|---------|---------|
 | route_processing | `graphs/graph.py` | task | 路由处理模式（单图/批量） | single→image_preprocess, batch→batch_process | - |
 | batch_process | `graphs/nodes/batch_process_node.py` | task | 批量图片处理 | - | - |
-| image_preprocess | `graphs/nodes/image_preprocess_node.py` | task | 图像预处理（去噪/增强/校正） | - | - |
-| ocr_recognize | `graphs/nodes/ocr_recognize_node.py` | task | Tesseract OCR识别（中文+英文） | - | - |
+| image_preprocess | `graphs/nodes/image_preprocess_node.py` | task | 图像预处理（CLAHE+锐化+S3上传） | - | - |
+| ocr_recognize | `graphs/nodes/ocr_recognize_node.py` | task | 多引擎OCR（RapidOCR→Tesseract） | - | - |
 | correct_text | `graphs/nodes/correct_text_node.py` | agent | LLM智能纠错 | - | `config/correct_text_llm_cfg.json` |
-| model_extract | `graphs/nodes/model_extract_node.py` | agent | LLM结构化提取 + 规则引擎降级 | - | `config/model_extract_llm_cfg.json` |
+| model_extract | `graphs/nodes/model_extract_node.py` | agent | LLM结构化提取 + 增强规则引擎降级 | - | `config/model_extract_llm_cfg.json` |
 | qa_answer | `graphs/nodes/qa_answer_node.py` | agent | 语义问答 | - | `config/qa_answer_llm_cfg.json` |
 | result_output | `graphs/nodes/result_output_node.py` | task | 结果输出（JSON/Excel/PDF+平台推送） | - | - |
-| cv_detection | `graphs/nodes/cv_detection_node.py` | task | YOLO目标检测（PackCV场景） | - | - |
-| report_generation | `graphs/nodes/report_generation_node.py` | task | 报表生成（效期/库存/合规） | - | - |
 
 **类型说明**: task(任务节点) / agent(大模型) / condition(条件分支) / looparray(列表循环) / loopcond(条件循环)
 
-## 核心模块说明
+## OCR引擎架构
 
-### 三层融合架构
+### 多引擎融合策略
+1. **RapidOCR (ONNX)** - 主引擎，基于PaddleOCR模型的ONNX推理
+   - 优点：速度快、无系统依赖、中文识别率高、pip install即可用
+   - 安装：`pip install rapidocr_onnxruntime`
+2. **Tesseract** - 备选引擎，传统OCR
+   - 优点：稳定可靠、支持多语言
+   - 缺点：需要chi_sim中文包、中文识别率较低
+3. **PaddleOCR** - 已禁用（OneDNN兼容性问题，环境变量ENABLE_PADDLEOCR=1可启用）
 
-1. **CV视觉层** (`src/core/cv/`)
-   - `detector.py`: YOLO目标检测，支持OBB有向边界框
-   - `preprocessor.py`: 标准化预处理（去噪/CLAHE/锐化/反光去除）
-   - `cropper.py`: ROI裁切（NMS去重/边缘补全）
+### 自动降级流程
+RapidOCR(置信度≥0.3) → Tesseract(中英→纯英) → 原始图像回退
 
-2. **OCR识别层** (`src/core/ocr/`)
-   - `ocr_scheduler.py`: 多引擎调度器
-     - 优先级: Tesseract → EasyOCR → PaddleOCR
-     - 健康检测与自动降级
-     - 多引擎结果融合
+## 预处理管线
+1. 大图智能缩放（最大边≤2000px）
+2. CLAHE对比度增强（Lab空间亮度通道处理）
+3. Unsharp Masking锐化
+4. 上传S3供OCR节点下载
 
-3. **融合决策层** (`src/core/llm/`)
-   - `decision_maker.py`: LLM条件触发器
-     - 置信度阈值判断
-     - 格式/逻辑校验
-   - `prompts.py`: 标准化提示词
+## 规则引擎增强
+- 11个提取字段：brand, product_name, specification, production_date, shelf_life, manufacturer, ingredients, standard, batch_number, license_number, storage_condition
+- 中英文双语正则支持（Brand/Product/Manufacturer/Shelf Life等英文标签）
+- 关联校验：生产日期+保质期→自动计算到期日期
+- 100+品牌直接匹配模式
+- 多格式日期/规格/标准号正则
+- 许可证号支持10-14位SC编号
 
-4. **规则引擎** (`src/core/rule_engine/`)
-   - `validator.py`: 效期校验（日期格式/逻辑/临期告警）
-   - `alert.py`: 告警管理（分级/去重/确认）
+## 依赖包
+- rapidocr-onnxruntime>=1.4.4 (OCR主引擎)
+- paddleocr (已禁用，保留安装)
+- pytesseract (OCR备选引擎)
+- opencv-python (图像处理)
+- coze-coding-dev-sdk (LLM/S3)
+- jinja2 (提示词模板)
 
-## 存储层
-
-| 模块 | 文件 | 说明 |
-|------|------|------|
-| 对象存储 | `storage/oss.py` | S3兼容存储封装 |
-| 数据库 | `storage/db.py` | PostgreSQL ORM模型 |
-| 缓存 | `storage/cache.py` | Redis/内存缓存 |
-
-## 部署方式
-
-### Docker Compose (推荐)
-```bash
-cd deploy
-docker-compose up -d
-```
-
-### Kubernetes
-```bash
-kubectl apply -f deploy/k8s-deployment.yaml
-```
-
-## CLI命令
-
-```bash
-# 单图识别
-packcv recognize image.jpg
-
-# 批量识别
-packcv batch ./images/ -o ./output/
-
-# 生成报表
-packcv report ./output/ -t expiry
-```
-
-## API接口
-
-- `POST /api/v1/recognize` - 单图识别
-- `POST /api/v1/recognize/batch` - 批量识别
-- `GET /api/v1/alerts` - 获取告警
-- `POST /api/v1/alerts/{id}/acknowledge` - 确认告警
-- `POST /api/v1/reports/generate` - 生成报表
-
-## 性能指标
-
-- 单图OCR识别：< 2秒
-- 批量处理吞吐量：> 5张/秒
-- OCR识别准确率：> 90%
-- 服务可用性：> 99.9%
+## 技能使用
+- OCR节点使用 RapidOCR(ONNX)、Tesseract
+- 预处理/输出节点使用 对象存储(S3SyncStorage)
+- 纠错/提取/问答节点使用 大语言模型(LLMClient)
 
 ## 环境变量
 
 | 变量 | 说明 | 默认值 |
 |------|------|--------|
-| DB_HOST | 数据库主机 | localhost |
-| REDIS_HOST | Redis主机 | localhost |
-| OSS_ENDPOINT | OSS端点 | - |
-| LOG_LEVEL | 日志级别 | INFO |
+| COZE_WORKSPACE_PATH | 项目工作目录 | /workspace/projects |
+| COZE_BUCKET_ENDPOINT_URL | S3端点URL | - |
+| COZE_BUCKET_NAME | S3桶名称 | - |
+| ENABLE_PADDLEOCR | 启用PaddleOCR | 0 |
