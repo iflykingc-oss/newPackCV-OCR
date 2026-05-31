@@ -1,19 +1,19 @@
 # -*- coding: utf-8 -*-
 """
-图像预处理节点
-对输入图片进行预处理：灰度化、高斯模糊、CLAHE增强、二值化
+图像预处理节点 - 稳定版
+用于OCR前的图像增强处理
 """
-
 import os
+import json
 import time
 import logging
-from typing import Optional
+import requests
+from typing import Optional, Dict, Any, List
+from io import BytesIO
 
 import cv2
 import numpy as np
 from PIL import Image
-from io import BytesIO
-import requests
 
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
@@ -37,20 +37,42 @@ def _get_s3_storage() -> S3SyncStorage:
 
 
 def download_image(url: str) -> Optional[np.ndarray]:
-    """下载图片并转换为OpenCV格式"""
+    """下载图片并转为OpenCV格式"""
     try:
-        if url.startswith('http://') or url.startswith('https://'):
-            response = requests.get(url, timeout=30)
-            if response.status_code != 200:
-                return None
-            pil_img = Image.open(BytesIO(response.content))
-            return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-        elif os.path.exists(url):
-            return cv2.imread(url)
-        return None
+        resp = requests.get(url, timeout=30)
+        resp.raise_for_status()
+        pil_img = Image.open(BytesIO(resp.content))
+        if pil_img.mode != 'RGB':
+            pil_img = pil_img.convert('RGB')
+        return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
     except Exception as e:
-        logger.error(f"下载图片失败: {e}")
+        logger.warning(f"图片下载失败: {e}")
         return None
+
+
+def preprocess_image(img: np.ndarray) -> np.ndarray:
+    """
+    OCR前图像预处理
+    1. 灰度化
+    2. CLAHE对比度增强
+    3. 轻度锐化
+    """
+    # 灰度化
+    if len(img.shape) == 3:
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    else:
+        gray = img.copy()
+
+    # CLAHE增强
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    enhanced = clahe.apply(gray)
+
+    # 轻度高斯去噪
+    denoised = cv2.GaussianBlur(enhanced, (3, 3), 0)
+
+    # 转回BGR
+    result = cv2.cvtColor(denoised, cv2.COLOR_GRAY2BGR)
+    return result
 
 
 def image_preprocess_node(
@@ -60,88 +82,75 @@ def image_preprocess_node(
 ) -> ImagePreprocessOutput:
     """
     title: 图像预处理
-    desc: 对输入图片进行灰度化、高斯模糊、CLAHE增强、二值化等预处理
+    desc: 对输入图片进行OCR前预处理，包括灰度化、CLAHE对比度增强、轻度去噪。
+          处理后的图片上传到对象存储供后续OCR节点使用。
     integrations: 对象存储
     """
     ctx = runtime.context
     start_time = time.time()
 
+    logger.info(f"开始图像预处理: {state.package_image.url if state.package_image else 'no image'}")
+
     try:
-        image_url = state.package_image.url if state.package_image else ""
-        if not image_url:
-            logger.error("无输入图片")
+        # 下载图片
+        img_url = ""
+        if state.package_image and state.package_image.url:
+            img_url = state.package_image.url
+
+        if not img_url:
+            logger.error("无可用图片URL")
             return ImagePreprocessOutput(
-                preprocessed_image=state.package_image,
+                preprocessed_image=None,
                 is_enhanced=False
             )
 
-        # 下载图片
-        img = download_image(image_url)
+        img = download_image(img_url)
         if img is None:
             logger.error("图片下载失败")
             return ImagePreprocessOutput(
-                preprocessed_image=state.package_image,
+                preprocessed_image=None,
                 is_enhanced=False
             )
 
-        logger.info(f"图片下载成功，尺寸: {img.shape}")
+        logger.info(f"图片下载成功: {img.shape}")
 
-        # 图像预处理管线
-        processed = img.copy()
+        # 预处理
+        preprocessed = preprocess_image(img)
+        logger.info(f"预处理完成: {preprocessed.shape}")
 
-        # 1. 灰度化
-        if len(processed.shape) == 3:
-            gray = cv2.cvtColor(processed, cv2.COLOR_BGR2GRAY)
-        else:
-            gray = processed.copy()
-
-        # 2. 高斯模糊（用于锐化）
-        blur = cv2.GaussianBlur(gray, (0, 0), 3)
-        sharpened = cv2.addWeighted(gray, 1.5, blur, -0.5, 0)
-
-        # 3. CLAHE增强
-        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-        enhanced = clahe.apply(sharpened)
-
-        # 4. 保存增强后的图片
-        temp_path = f"/tmp/preprocessed_{int(time.time())}.png"
-        cv2.imwrite(temp_path, enhanced)
-
-        # 5. 上传到S3
-        upload_url = image_url  # 默认使用原图
-        try:
-            storage = _get_s3_storage()
-            with open(temp_path, 'rb') as f:
-                file_bytes = f.read()
-
-            file_name = f"preprocessed/preprocessed_{int(time.time())}.png"
-            key = storage.upload_file(
-                file_content=file_bytes,
-                file_name=file_name,
-                content_type='image/png'
+        # 保存为PNG并上传
+        success, img_encoded = cv2.imencode('.png', preprocessed)
+        if not success:
+            logger.error("图片编码失败")
+            return ImagePreprocessOutput(
+                preprocessed_image=None,
+                is_enhanced=False
             )
-            upload_url = storage.generate_presigned_url(key=key, expire_time=3600)
-            logger.info(f"预处理图片已上传S3: {key}")
-        except Exception as e:
-            logger.warning(f"S3上传失败，使用原图: {e}")
 
-        # 清理临时文件
-        try:
-            os.remove(temp_path)
-        except Exception:
-            pass
+        img_bytes = img_encoded.tobytes()
+
+        # 上传S3
+        storage = _get_s3_storage()
+        file_name = f"preprocessed/preprocessed_{int(time.time())}.png"
+        key = storage.upload_file(
+            file_content=img_bytes,
+            file_name=file_name,
+            content_type='image/png'
+        )
+        presigned_url = storage.generate_presigned_url(key=key, expire_time=3600)
+        logger.info(f"预处理图片已上传: {presigned_url[:60]}...")
 
         elapsed_time = time.time() - start_time
         logger.info(f"图像预处理完成，耗时: {elapsed_time:.2f}秒")
 
         return ImagePreprocessOutput(
-            preprocessed_image=File(url=upload_url, file_type="image"),
+            preprocessed_image=File(url=presigned_url, file_type="image"),
             is_enhanced=True
         )
 
     except Exception as e:
-        logger.error(f"图像预处理异常: {e}")
+        logger.error(f"图像预处理异常: {e}", exc_info=True)
         return ImagePreprocessOutput(
-            preprocessed_image=state.package_image,
+            preprocessed_image=None,
             is_enhanced=False
         )

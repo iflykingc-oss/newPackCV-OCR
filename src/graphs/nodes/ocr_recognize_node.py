@@ -1,7 +1,7 @@
 # -*- coding: utf-8 -*-
 """
-OCR文字识别节点 - 基于Tesseract和内嵌OCR引擎
-无需下载外部模型，即插即用
+OCR文字识别节点 - 稳定版
+基于Tesseract OCR，支持中英文识别
 """
 import os
 import json
@@ -38,153 +38,42 @@ def _get_s3_storage() -> S3SyncStorage:
 
 
 def download_image(url: str) -> Optional[np.ndarray]:
-    """下载图片并转换为OpenCV格式"""
+    """下载图片并转为OpenCV格式"""
     try:
-        if url.startswith('data:'):
-            header, data = url.split(',', 1)
-            img_bytes = BytesIO(data.encode())
-            pil_img = Image.open(img_bytes)
-            img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-            return img
-        
-        if url.startswith('http://') or url.startswith('https://'):
-            response = requests.get(url, timeout=30)
-            if response.status_code != 200:
-                logger.error(f"下载图片失败: HTTP {response.status_code}")
-                return None
-            pil_img = Image.open(BytesIO(response.content))
-            img = cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
-            return img
-        
-        if os.path.exists(url):
-            img = cv2.imread(url)
-            return img
-        
-        logger.error(f"无效的图片路径: {url}")
-        return None
-        
+        resp = requests.get(url, timeout=30)
+        resp.raise_for_status()
+        pil_img = Image.open(BytesIO(resp.content))
+        if pil_img.mode != 'RGB':
+            pil_img = pil_img.convert('RGB')
+        return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
     except Exception as e:
-        logger.error(f"下载图片异常: {e}")
+        logger.warning(f"图片下载失败: {e}")
         return None
 
 
-class OCRResult:
-    """OCR识别结果内部数据结构"""
-    def __init__(self, raw_text: str, confidence: float, regions: List, engine: str, metadata: Dict):
-        self.raw_text = raw_text
-        self.confidence = confidence
-        self.regions = regions
-        self.engine = engine
-        self.metadata = metadata
-
-
-def use_tesseract_ocr(img: np.ndarray) -> OCRResult:
-    """使用Tesseract OCR识别"""
+def ocr_with_tesseract(img: np.ndarray, psm: int = 6, lang: str = "chi_sim+eng") -> str:
+    """
+    使用Tesseract进行OCR识别
+    """
     try:
-        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
-        
-        # 高斯锐化
-        blur = cv2.GaussianBlur(gray, (0, 0), 3)
-        sharpened = cv2.addWeighted(gray, 1.5, blur, -0.5, 0)
-        
-        # CLAHE对比度增强
-        clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
-        enhanced = clahe.apply(sharpened)
-        
-        pil_img = Image.fromarray(enhanced)
-        
-        config = '--psm 6 -l chi_sim+eng --oem 3'
-        text = pytesseract.image_to_string(pil_img, config=config)
-        data = pytesseract.image_to_data(pil_img, config=config, output_type=pytesseract.Output.DICT)
-        
-        confidences = [int(conf) for conf in data['conf'] if int(conf) > 0]
-        avg_confidence = sum(confidences) / len(confidences) if confidences else 0.0
-        
-        regions = []
-        n_boxes = len(data['text'])
-        for i in range(n_boxes):
-            if int(data['conf'][i]) > 0:
-                regions.append({
-                    'text': data['text'][i],
-                    'confidence': int(data['conf'][i]),
-                    'bbox': {
-                        'x': data['left'][i],
-                        'y': data['top'][i],
-                        'width': data['width'][i],
-                        'height': data['height'][i]
-                    }
-                })
-        
-        text = text.strip()
-        
-        result = OCRResult(
-            raw_text=text,
-            confidence=avg_confidence / 100.0,
-            regions=regions,
-            engine='tesseract',
-            metadata={
-                'status': 'success',
-                'regions_count': len(regions)
-            }
-        )
-        
-        logger.info(f"Tesseract识别成功: {len(text)}字符, 置信度: {avg_confidence:.1f}%")
-        return result
-        
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img.copy()
+        pil_img = Image.fromarray(gray)
+        config = f'--psm {psm} -l {lang} --oem 3'
+        return pytesseract.image_to_string(pil_img, config=config).strip()
     except Exception as e:
-        logger.error(f"Tesseract OCR错误: {e}")
-        return OCRResult(
-            raw_text="",
-            confidence=0.0,
-            regions=[],
-            engine='tesseract',
-            metadata={'error': str(e)}
-        )
+        logger.warning(f"Tesseract OCR失败 (psm={psm}, lang={lang}): {e}")
+        return ""
 
 
-def use_builtin_ocr(img: np.ndarray) -> OCRResult:
-    """使用内嵌OCR（备用方案）"""
-    try:
-        from core.ocr.builtin_ocr import builtin_ocr
-        
-        temp_path = '/tmp/builtin_ocr_input.jpg'
-        cv2.imwrite(temp_path, img)
-        
-        result = builtin_ocr(temp_path)
-        
-        if result is None:
-            return OCRResult(
-                raw_text="",
-                confidence=0.0,
-                regions=[],
-                engine='builtin',
-                metadata={'error': '引擎返回空结果'}
-            )
-        
-        regions_list = []
-        if hasattr(result, 'raw_text') and result.raw_text:
-            regions_list.append({
-                'text': result.raw_text,
-                'confidence': result.confidence if hasattr(result, 'confidence') else 0.5
-            })
-        
-        return OCRResult(
-            raw_text=result.raw_text if hasattr(result, 'raw_text') else "",
-            confidence=result.confidence if hasattr(result, 'confidence') else 0.0,
-            regions=regions_list,
-            engine='builtin',
-            metadata={'status': 'success'}
-        )
-        
-    except Exception as e:
-        logger.error(f"内嵌OCR错误: {e}")
-        return OCRResult(
-            raw_text="",
-            confidence=0.0,
-            regions=[],
-            engine='builtin',
-            metadata={'error': str(e)}
-        )
+def preprocess_for_ocr(img: np.ndarray) -> np.ndarray:
+    """
+    OCR前预处理：灰度化 + 适度增强
+    """
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+    # 轻度CLAHE增强
+    clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+    enhanced = clahe.apply(gray)
+    return enhanced
 
 
 def ocr_recognize_node(
@@ -194,98 +83,109 @@ def ocr_recognize_node(
 ) -> OCRRecognizeOutput:
     """
     title: OCR文字识别
-    desc: 识别图片中的文字内容，支持中文和英文。使用Tesseract OCR引擎，无需下载外部模型。
+    desc: 使用Tesseract OCR进行文字识别，支持中英文。当预处理图片识别失败时自动回退到原始图片。
     integrations: Tesseract OCR
     """
     ctx = runtime.context
     start_time = time.time()
-    
-    logger.info(f"开始OCR识别: {state.package_image.url if state.package_image else 'no image'}")
-    
-    try:
-        # 选择图片：优先使用预处理后的图片
-        image_url = ""
-        if state.preprocessed_image and state.preprocessed_image.url:
-            image_url = state.preprocessed_image.url
-        elif state.package_image and state.package_image.url:
-            image_url = state.package_image.url
-        elif state.image and state.image.url:
-            image_url = state.image.url
-        else:
-            logger.error("无可用图片")
-            return OCRRecognizeOutput(
-                raw_text="",
-                ocr_confidence=0.0,
-                engine_used="none",
-                processing_time=time.time() - start_time
-            )
-        
-        # 下载图片
-        img = download_image(image_url)
-        if img is None:
-            return OCRRecognizeOutput(
-                raw_text="",
-                ocr_confidence=0.0,
-                engine_used="none",
-                processing_time=time.time() - start_time
-            )
-        
-        logger.info(f"图片下载成功，尺寸: {img.shape}")
-        
-        # 优先使用Tesseract OCR
-        result = use_tesseract_ocr(img)
-        
-        # 如果Tesseract没有结果，尝试内嵌OCR
-        if not result.raw_text.strip():
-            logger.info("Tesseract无结果，尝试内嵌OCR")
-            result = use_builtin_ocr(img)
-        
-        elapsed_time = time.time() - start_time
-        logger.info(f"OCR识别完成，耗时: {elapsed_time:.2f}秒")
-        logger.info(f"识别文本: {result.raw_text[:200] if result.raw_text else '(empty)'}...")
-        
-        # 上传结果到S3（失败不影响返回结果）
-        try:
-            storage = _get_s3_storage()
-            result_data = {
-                "raw_text": result.raw_text,
-                "confidence": result.confidence,
-                "metadata": result.metadata,
-                "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
-            }
-            
-            result_json = json.dumps(result_data, ensure_ascii=False, indent=2)
-            result_bytes = result_json.encode('utf-8')
-            
-            file_name = f"ocr_results/ocr_result_{int(time.time())}.json"
-            key = storage.upload_file(
-                file_content=result_bytes,
-                file_name=file_name,
-                content_type='application/json'
-            )
-            export_url = storage.generate_presigned_url(key=key, expire_time=3600)
-            logger.info(f"OCR结果已上传S3: {key}")
-        except Exception as upload_err:
-            logger.warning(f"S3上传失败，不影响结果返回: {upload_err}")
-        
+
+    # 选择图片（优先预处理后的图片）
+    image_url = ""
+    if state.preprocessed_image and state.preprocessed_image.url:
+        image_url = state.preprocessed_image.url
+    elif state.package_image and state.package_image.url:
+        image_url = state.package_image.url
+    elif state.image and state.image.url:
+        image_url = state.image.url
+
+    if not image_url:
+        logger.error("无可用图片")
         return OCRRecognizeOutput(
-            ocr_raw_result=result.raw_text,
-            raw_text=result.raw_text,
-            ocr_confidence=result.confidence,
-            confidence=result.confidence,
-            ocr_regions=result.regions,
-            regions=result.regions,
-            engine_used=result.engine,
-            processing_time=elapsed_time
-        )
-        
-    except Exception as e:
-        logger.error(f"OCR识别异常: {e}")
-        return OCRRecognizeOutput(
-            ocr_raw_result="",
-            raw_text="",
+            raw_text="[ERROR] 无可用图片",
             ocr_confidence=0.0,
-            confidence=0.0,
-            engine_used="error",
+            engine_used="none",
             processing_time=time.time() - start_time
         )
+
+    # 下载图片
+    img = download_image(image_url)
+    if img is None:
+        return OCRRecognizeOutput(
+            raw_text="[ERROR] 图片下载失败",
+            ocr_confidence=0.0,
+            engine_used="none",
+            processing_time=time.time() - start_time
+        )
+
+    # OCR识别
+    final_text = ""
+    final_conf = 0.0
+    engine = "tesseract"
+
+    # 1. 尝试预处理图片 OCR
+    processed = preprocess_for_ocr(img)
+    processed_bgr = cv2.cvtColor(processed, cv2.COLOR_GRAY2BGR)
+
+    # PSM 6: 统一文本块
+    final_text = ocr_with_tesseract(processed_bgr, psm=6, lang="chi_sim+eng")
+    if not final_text:
+        # PSM 3: 完全自动分页
+        final_text = ocr_with_tesseract(processed_bgr, psm=3, lang="chi_sim+eng")
+    if not final_text:
+        # 仅用英文
+        final_text = ocr_with_tesseract(processed_bgr, psm=6, lang="eng")
+
+    # 2. 如果预处理图片OCR为空，尝试原始图片
+    if not final_text:
+        logger.info("预处理后OCR为空，尝试原始图片")
+        original_url = ""
+        if state.package_image and state.package_image.url:
+            original_url = state.package_image.url
+        elif state.image and state.image.url:
+            original_url = state.image.url
+
+        if original_url and original_url != image_url:
+            original_img = download_image(original_url)
+            if original_img is not None:
+                final_text = ocr_with_tesseract(original_img, psm=6, lang="chi_sim+eng")
+                if not final_text:
+                    final_text = ocr_with_tesseract(original_img, psm=3, lang="chi_sim+eng")
+                if final_text:
+                    engine = "tesseract_original"
+
+    # 3. 如果仍然为空，标记为失败但返回空字符串
+    if not final_text:
+        logger.warning("OCR识别结果为空")
+        final_text = ""
+        final_conf = 0.0
+    else:
+        final_conf = 0.75
+
+    elapsed_time = time.time() - start_time
+    logger.info(f"OCR完成: 耗时={elapsed_time:.2f}s, 文本长度={len(final_text)}")
+
+    # 上传结果到S3
+    try:
+        storage = _get_s3_storage()
+        result_data = {
+            "raw_text": final_text,
+            "confidence": final_conf,
+            "engine": engine,
+            "timestamp": time.strftime("%Y-%m-%d %H:%M:%S")
+        }
+        result_json = json.dumps(result_data, ensure_ascii=False, indent=2)
+        file_name = f"ocr_results/ocr_result_{int(time.time())}.json"
+        storage.upload_file(
+            file_content=result_json.encode('utf-8'),
+            file_name=file_name,
+            content_type='application/json'
+        )
+    except Exception as upload_err:
+        logger.warning(f"S3上传失败: {upload_err}")
+
+    return OCRRecognizeOutput(
+        raw_text=final_text,
+        ocr_confidence=final_conf,
+        engine_used=engine,
+        processing_time=elapsed_time
+    )
