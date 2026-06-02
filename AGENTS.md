@@ -1,14 +1,16 @@
 # PackCV-OCR 项目结构索引
 
 ## 项目概述
-- **名称**: PackCV-OCR V2.3
+- **名称**: PackCV-OCR V2.4
 - **功能**: 面向货架/包装场景的高精度OCR识别解决方案
-- **核心升级**: RapidOCR(ONNX)为主引擎 + Tesseract备选 + 增强中英文规则提取
+- **核心升级**: RapidOCR(ONNX)主引擎 + Tesseract多PSM备选 + 竞品级后处理
 
 ### 核心特性
-- RapidOCR(ONNX)主引擎 + Tesseract备选（PaddleOCR已禁用-OneDNN兼容性问题）
+- RapidOCR(ONNX)主引擎 + Tesseract多PSM扫描（PaddleOCR已禁用-OneDNN兼容性问题）
 - 自动引擎降级与原始图像回退
-- 轻量级图像预处理（CLAHE增强+锐化，RapidOCR自带文本检测）
+- 竞品级OCR后处理：IoU去重→阅读顺序排序→置信度过滤→段落合并
+- 智能倾斜校正（霍夫变换直线检测+自动旋转）
+- 增强型词汇校正字典（20+包装场景常见OCR错误纠正）
 - LLM智能纠错与结构化提取
 - 增强版规则引擎（11个字段、中英文双语支持、关联校验、到期日计算）
 - 效期检测与告警
@@ -20,8 +22,8 @@
 |-------|---------|------|---------|---------|---------|
 | route_processing | `graphs/graph.py` | task | 路由处理模式（单图/批量） | single→image_preprocess, batch→batch_process | - |
 | batch_process | `graphs/nodes/batch_process_node.py` | task | 批量图片处理 | - | - |
-| image_preprocess | `graphs/nodes/image_preprocess_node.py` | task | 图像预处理（CLAHE+锐化+S3上传） | - | - |
-| ocr_recognize | `graphs/nodes/ocr_recognize_node.py` | task | 多引擎OCR（RapidOCR→Tesseract） | - | - |
+| image_preprocess | `graphs/nodes/image_preprocess_node.py` | task | 图像预处理（CLAHE+锐化+倾斜校正+S3上传） | - | - |
+| ocr_recognize | `graphs/nodes/ocr_recognize_node.py` | task | 多引擎OCR + IoU去重 + 阅读排序 + 词汇校正 | - | - |
 | correct_text | `graphs/nodes/correct_text_node.py` | agent | LLM智能纠错 | - | `config/correct_text_llm_cfg.json` |
 | model_extract | `graphs/nodes/model_extract_node.py` | agent | LLM结构化提取 + 增强规则引擎降级 | - | `config/model_extract_llm_cfg.json` |
 | qa_answer | `graphs/nodes/qa_answer_node.py` | agent | 语义问答 | - | `config/qa_answer_llm_cfg.json` |
@@ -45,9 +47,16 @@ RapidOCR(置信度≥0.3) → Tesseract(中英→纯英) → 原始图像回退
 
 ## 预处理管线
 1. 大图智能缩放（最大边≤2000px）
-2. CLAHE对比度增强（Lab空间亮度通道处理）
-3. Unsharp Masking锐化
-4. 上传S3供OCR节点下载
+2. 倾斜校正（霍夫变换直线检测）
+3. CLAHE对比度增强（Lab空间亮度通道处理）
+4. Unsharp Masking锐化
+5. 上传S3供OCR节点下载
+
+## FAQ
+### 为什么有些字段返回N/A？
+- 包装标签上不存在该字段（如本例没有批次号）
+- OCR未能识别到该区域文字（如"Storage:"后值被漏检）
+- 图像质量或文字清晰度不足
 
 ## 规则引擎增强
 - 11个提取字段：brand, product_name, specification, production_date, shelf_life, manufacturer, ingredients, standard, batch_number, license_number, storage_condition

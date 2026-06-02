@@ -54,6 +54,54 @@ def download_image(url: str) -> Optional[np.ndarray]:
         return None
 
 
+def _detect_and_correct_skew(img: np.ndarray) -> Tuple[np.ndarray, float]:
+    """
+    检测并校正图像倾斜角度（适用于扫描件/拍照歪斜）
+    通过霍夫变换检测直线角度，修正旋转
+    """
+    if img is None or img.size == 0:
+        return img, 0.0
+
+    try:
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        # 边缘检测
+        edges = cv2.Canny(gray, 50, 150, apertureSize=3)
+        # 霍夫变换检测直线
+        lines = cv2.HoughLinesP(edges, 1, np.pi / 180, 100, minLineLength=100, maxLineGap=10)
+
+        if lines is None or len(lines) < 5:
+            return img, 0.0  # 直线太少，不校正
+
+        angles = []
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
+            if abs(x2 - x1) > 10:  # 忽略垂直线
+                angle = np.degrees(np.arctan2(y2 - y1, x2 - x1))
+                angles.append(angle)
+
+        if not angles:
+            return img, 0.0
+
+        # 取中位数角度
+        median_angle = np.median(angles)
+        # 小角度校正（只校正|角度|在0.5-45度之间）
+        if abs(median_angle) < 0.5 or abs(median_angle) > 45:
+            return img, 0.0
+
+        logger.info(f"检测到图像倾斜: {median_angle:.2f}度，正在进行校正")
+
+        h, w = img.shape[:2]
+        center = (w // 2, h // 2)
+        rotation_matrix = cv2.getRotationMatrix2D(center, median_angle, 1.0)
+        rotated = cv2.warpAffine(img, rotation_matrix, (w, h),
+                                 flags=cv2.INTER_CUBIC, borderMode=cv2.BORDER_REPLICATE)
+        return rotated, median_angle
+
+    except Exception as e:
+        logger.warning(f"倾斜校正失败: {e}")
+        return img, 0.0
+
+
 def enhance_for_ocr(img: np.ndarray) -> Tuple[np.ndarray, Dict[str, Any]]:
     """
     轻量级OCR预处理管线
@@ -82,7 +130,16 @@ def enhance_for_ocr(img: np.ndarray) -> Tuple[np.ndarray, Dict[str, Any]]:
         info["resize_scale"] = round(scale, 3)
         logger.info(f"大图缩放: {w}x{h} -> {new_w}x{new_h}")
 
-    # 2. CLAHE对比度增强（Lab空间处理亮度通道）
+    # 2. 倾斜校正（拍照歪斜补偿）
+    try:
+        result, skew_angle = _detect_and_correct_skew(result)
+        if abs(skew_angle) > 0.5:
+            info["rotation_angle"] = round(skew_angle, 2)
+            logger.info(f"图像旋转校正: {skew_angle:.2f}度")
+    except Exception as e:
+        logger.warning(f"倾斜校正异常: {e}")
+
+    # 3. CLAHE对比度增强（Lab空间处理亮度通道）
     try:
         lab = cv2.cvtColor(result, cv2.COLOR_BGR2LAB)
         l_channel, a_channel, b_channel = cv2.split(lab)
