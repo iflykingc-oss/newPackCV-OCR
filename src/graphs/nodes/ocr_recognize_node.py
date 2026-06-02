@@ -59,12 +59,17 @@ _rapid_ocr_instance = None
 
 
 def _get_rapid_ocr():
-    """获取RapidOCR单例实例"""
+    """获取RapidOCR单例实例（使用优化配置）"""
     global _rapid_ocr_instance
     if _rapid_ocr_instance is None and _RAPID_OCR_AVAILABLE:
         try:
-            _rapid_ocr_instance = RapidOCR()
-            logger.info("RapidOCR实例初始化成功")
+            cfg_path = os.path.join(os.getenv("COZE_WORKSPACE_PATH", ""), "config/rapidocr_optimized.yaml")
+            if os.path.exists(cfg_path):
+                _rapid_ocr_instance = RapidOCR(config_path=cfg_path)
+                logger.info(f"RapidOCR实例初始化成功（使用优化配置）")
+            else:
+                _rapid_ocr_instance = RapidOCR()
+                logger.info("RapidOCR实例初始化成功（默认配置）")
         except Exception as e:
             logger.warning(f"RapidOCR初始化失败: {e}")
     return _rapid_ocr_instance
@@ -248,43 +253,37 @@ def multi_engine_ocr(img: np.ndarray, time_budget: float = 30.0) -> Tuple[str, f
     """
     start = time.time()
 
-    # 第一优先级: RapidOCR（推荐引擎）
+    # 第一优先级: RapidOCR（推荐引擎 - 优先选用）
     rapid_text, rapid_conf, rapid_regions = "", 0.0, []
+    rapid_text_len = 0
     if _RAPID_OCR_AVAILABLE:
         text, conf, regions = ocr_with_rapid(img)
-        if text and conf >= 0.5:
-            logger.info(f"RapidOCR高置信度: 文本长度={len(text)}, 置信度={conf:.4f}")
-            return text, conf, regions, "rapidocr"
-        rapid_text, rapid_conf, rapid_regions = text, conf, regions
         if text:
-            logger.info(f"RapidOCR低置信度({conf:.4f}), 尝试Tesseract补充")
+            rapid_text, rapid_conf, rapid_regions = text, conf, regions
+            rapid_text_len = len(text)
+            logger.info(f"RapidOCR识别: 文本长度={rapid_text_len}, 置信度={conf:.4f}")
 
-    # 检查时间预算
+    # 时间预算检查
     elapsed = time.time() - start
     if elapsed > time_budget * 0.7:
         logger.info(f"时间预算不足({elapsed:.1f}s)，跳过Tesseract")
         if rapid_text:
-            return rapid_text, rapid_conf, rapid_regions, "rapidocr_low_conf"
+            return rapid_text, rapid_conf, rapid_regions, "rapidocr"
 
-    # 第二优先级: Tesseract中英混合（多PSM）
+    # 第二优先级: Tesseract中英混合（仅当RapidOCR未检测到文本时）
     tesseract_text, tesseract_conf = "", 0.0
-    if _TESSERACT_AVAILABLE:
+    if not rapid_text and _TESSERACT_AVAILABLE:
         text, conf = ocr_with_tesseract_multi_psm(img, lang="chi_sim+eng")
         if text:
             tesseract_text, tesseract_conf = text, conf
             logger.info(f"Tesseract中英识别: 文本长度={len(text)}, 置信度={conf:.4f}")
 
-    # 融合策略：选择置信度高的
-    if rapid_text and tesseract_text:
-        if rapid_conf >= tesseract_conf:
-            logger.info(f"融合选择: RapidOCR(conf={rapid_conf:.4f}) > Tesseract(conf={tesseract_conf:.4f})")
-            return rapid_text, rapid_conf, rapid_regions, "rapidocr"
-        else:
-            logger.info(f"融合选择: Tesseract(conf={tesseract_conf:.4f}) > RapidOCR(conf={rapid_conf:.4f})")
-            return tesseract_text, tesseract_conf, [], "tesseract"
-    elif rapid_text:
-        return rapid_text, rapid_conf, rapid_regions, "rapidocr_low_conf"
+    # 融合策略：优先RapidOCR（检测更精细），Tesseract仅在RapidOCR无结果时使用
+    if rapid_text:
+        logger.info(f"最终选择: RapidOCR(文本长度={rapid_text_len}, conf={rapid_conf:.4f})")
+        return rapid_text, rapid_conf, rapid_regions, "rapidocr"
     elif tesseract_text:
+        logger.info(f"最终选择: Tesseract(文本长度={len(tesseract_text)}, conf={tesseract_conf:.4f})")
         return tesseract_text, tesseract_conf, [], "tesseract"
 
     # 第三优先级: Tesseract纯英文
@@ -464,11 +463,11 @@ def post_process_ocr_results(
     # 2. 按阅读顺序排序
     regions = _sort_boxes_reading_order(regions)
 
-    # 3. 置信度过滤
-    filtered_regions = [r for r in regions if r.get("confidence", 0) >= 0.3]
+    # 3. 置信度过滤（宽松阈值，宁可多留不可漏检）
+    filtered_regions = [r for r in regions if r.get("confidence", 0) >= 0.15]
 
     if not filtered_regions:
-        # 如果全部过滤掉，至少保留置信度最高的
+        # 全部过滤掉时，保留置信度最高的
         if regions:
             filtered_regions = [max(regions, key=lambda r: r.get("confidence", 0))]
 
@@ -492,6 +491,8 @@ def post_process_ocr_text(text: str) -> str:
     word_corrections: Dict[str, str] = {
         "Storrge": "Storage",
         "storrge": "storage",
+        "Storge": "Storage",
+        "Storege": "Storage",
         "Maufacturer": "Manufacturer",
         "maufacturer": "manufacturer",
         "Mantfacturer": "Manufacturer",
@@ -507,6 +508,7 @@ def post_process_ocr_text(text: str) -> str:
         "contet": "content",
         "Adress": "Address",
         "adress": "address",
+        "YiHaijiaLi": "YiHaiJiaLi",
     }
 
     lines = text.split('\n')

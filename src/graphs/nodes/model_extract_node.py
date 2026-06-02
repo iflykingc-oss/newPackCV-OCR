@@ -126,8 +126,8 @@ def rule_based_extract(ocr_text: str, template_fields: List[str]) -> Dict[str, A
 
     # ==================== 批号提取 ====================
     batch_number_rules = [
-        r"(?:批号|批次|生产批号|批编码|LOT|Batch)[：:]*\s*([A-Za-z0-9\-_]+)",
-        r"(?:LOT\s*NO|BATCH\s*NO)[.:：]*\s*([A-Za-z0-9\-_]+)",
+        r"(?:批号|批次|生产批号|批编码|LOT|Batch)\s*(?:No|NO|编号)?[：:]*\s*([A-Za-z0-9\-_/]{4,})",
+        r"(?:LOT\s*NO|BATCH\s*NO|LOT\s+#)[.:：]*\s*([A-Za-z0-9\-_/]{4,})",
     ]
 
     # ==================== 许可证号提取 ====================
