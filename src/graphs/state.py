@@ -169,6 +169,7 @@ class ModelExtractInput(BaseModel):
     model_name: str = Field(default="doubao-seed-2-0-pro-260215", description="使用的模型名称")
     custom_prompt: Optional[str] = Field(default="", description="自定义提示词")
     template_fields: Optional[List[str]] = Field(default_factory=list, description="需要提取的字段列表")
+    regions: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="OCR识别区域列表（含bbox坐标）")
 
 
 class ModelExtractOutput(BaseModel):

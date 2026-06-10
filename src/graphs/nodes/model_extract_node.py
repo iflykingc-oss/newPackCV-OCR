@@ -263,6 +263,137 @@ def _compute_expiry_date(result: Dict[str, Any]) -> None:
     result["expiry_date"] = expiry_date.strftime("%Y-%m-%d")
 
 
+def _layout_aware_extract(regions: List[Dict[str, Any]]) -> Dict[str, str]:
+    """
+    布局感知的键值对提取
+    利用OCR区域的bbox坐标，按水平对齐关系识别标签名→值的配对
+    """
+    kv_pairs: Dict[str, str] = {}
+
+    if not regions:
+        return kv_pairs
+
+    # 按Y轴中心排序（从上到下）
+    sorted_regions = sorted(regions, key=lambda r: (r.get("bbox", [0, 0, 0, 0])[1] + r.get("bbox", [0, 0, 0, 0])[3]) / 2)
+
+    # 同行文本合并：Y坐标相差<20px的视为同一行
+    lines: List[List[Dict]] = []
+    current_line: List[Dict] = []
+    last_y = -100
+
+    for region in sorted_regions:
+        bbox = region.get("bbox", [0, 0, 0, 0])
+        center_y = (bbox[1] + bbox[3]) / 2
+        if abs(center_y - last_y) > 20 and current_line:
+            lines.append(current_line)
+            current_line = [region]
+        else:
+            current_line.append(region)
+        last_y = center_y
+
+    if current_line:
+        lines.append(current_line)
+
+    # 按X轴排序每行内的元素
+    for line in lines:
+        sorted_line = sorted(line, key=lambda r: r.get("bbox", [0, 0, 0, 0])[0])
+
+        # 尝试构建标签→值对
+        texts = [r.get("text", "").strip() for r in sorted_line if r.get("text")]
+        full_line = " ".join(texts)
+
+        # 查找标签:值模式（同一行内）
+        kv_match = re.match(r'^([^:：]+)[:：]\s*(.+)$', full_line)
+        if kv_match:
+            label = kv_match.group(1).strip().lower()
+            value = kv_match.group(2).strip()
+
+            # 将常见标签映射到字段名
+            label_map = {
+                "brand": "brand", "品牌": "brand", "商标": "brand",
+                "product": "product_name", "product name": "product_name",
+                "品名": "product_name", "产品名称": "product_name", "名称": "product_name",
+                "规格": "specification", "净含量": "specification", "net content": "specification",
+                "specification": "specification", "net weight": "specification",
+                "生产日期": "production_date", "production date": "production_date",
+                "date": "production_date", "生产": "production_date",
+                "保质期": "shelf_life", "shelf life": "shelf_life", "保质": "shelf_life",
+                "manufacturer": "manufacturer", "制造商": "manufacturer", "生产商": "manufacturer",
+                "配料": "ingredients", "ingredients": "ingredients", "成分": "ingredients",
+                "执行标准": "standard", "standard": "standard", "标准号": "standard",
+                "批号": "batch_number", "batch": "batch_number", "lot": "batch_number",
+                "许可证": "license_number", "license": "license_number",
+                "贮存条件": "storage_condition", "storage": "storage_condition",
+                "storage condition": "storage_condition", "存放条件": "storage_condition",
+            }
+
+            for key, field in label_map.items():
+                if label.startswith(key) or key in label:
+                    if field not in kv_pairs:
+                        kv_pairs[field] = value
+                    break
+
+    return kv_pairs
+
+
+def _llm_post_correct(
+    structured_data: Dict[str, Any],
+    ocr_text: str,
+    ctx: Context,
+    llm_config: Dict
+) -> Dict[str, Any]:
+    """
+    LLM后验证和纠错：
+    1. 识别明显的OCR识别错误
+    2. 标准化日期格式
+    3. 纠正品牌名称
+    """
+    try:
+        # 使用LLM验证关键字段
+        correction_prompt = f"""请验证并纠正以下包装标签的结构化提取结果。如果发现明显错误请修正。
+
+OCR原始文本：
+{ocr_text}
+
+当前提取结果：
+{json.dumps(structured_data, ensure_ascii=False, indent=2)}
+
+修正规则：
+1. 日期格式统一为YYYY-MM-DD
+2. 生产商名称纠正常见OCR识别错误
+3. 保质期格式统一为"X个月"或"X天"
+4. 保留已经正确的值，不要随意替换为N/A
+5. 对于明显错误的OCR识别（如Storege→Storage）自动纠正
+6. 输出JSON格式，保持所有现有字段
+
+请只返回JSON："""
+        client = LLMClient(ctx=ctx)
+        messages = [
+            SystemMessage(content="你是一个专业的OCR结果校验助手。仅返回JSON，不要包含其他内容。"),
+            HumanMessage(content=correction_prompt)
+        ]
+        response = client.invoke(
+            messages=messages,
+            model=llm_config.get("model", "doubao-seed-2-0-pro-260215"),
+            temperature=0.1,
+            max_tokens=2000,
+        )
+
+        if response and hasattr(response, 'content'):
+            content = response.content if isinstance(response.content, str) else str(response.content)
+            json_match = re.search(r'\{.*\}', content, re.DOTALL)
+            if json_match:
+                corrected = json.loads(json_match.group())
+                # 只保留原始字段集
+                for key in structured_data:
+                    if key in corrected and corrected[key]:
+                        structured_data[key] = corrected[key]
+    except Exception as e:
+        logger.warning(f"LLM后验证失败，保留原始结果: {str(e)}")
+
+    return structured_data
+
+
 def model_extract_node(
     state: ModelExtractInput,
     config: RunnableConfig,
@@ -271,13 +402,25 @@ def model_extract_node(
     """
     title: 结构化信息提取
     desc: 使用大语言模型从OCR识别文本中提取结构化信息（如品牌、规格、生产日期等），
-          LLM不可用时自动降级到增强版规则引擎
+          LLM不可用时自动降级到增强版规则引擎。
+          支持布局感知提取（利用OCR区域坐标）和LLM后验证纠错。
     integrations: 大语言模型
     """
     ctx = runtime.context
 
     # 预先获取ocr_text（避免在except块中使用未定义变量）
     ocr_text = state.ocr_text or state.raw_text or state.ocr_raw_result or ""
+    regions = state.regions or []
+
+    # Step 1: 布局感知提取（快速KV配对）
+    layout_data = _layout_aware_extract(regions)
+
+    # Step 2: 规则引擎提取（与布局数据互补）
+    rule_data = rule_based_extract(ocr_text, state.template_fields or [])
+
+    # Step 3: 融合布局感知结果和规则结果（布局优先）
+    for key, value in layout_data.items():
+        rule_data[key] = value  # 布局结果覆盖规则结果（更准确）
 
     try:
         # 加载模型配置
@@ -350,11 +493,16 @@ def model_extract_node(
                 confidence = 0.8
 
         except json.JSONDecodeError as e:
-            logger.warning(f"JSON解析失败，尝试文本提取: {str(e)}")
-            structured_data = {"raw_extract": result_text}
-            confidence = 0.5
+            logger.warning(f"JSON解析失败，使用规则引擎结果: {str(e)}")
+            # 使用融合后的规则引擎结果
+            structured_data = rule_data
+            confidence = 0.7
 
-        logger.info(f"LLM结构化提取完成，置信度: {confidence:.2f}")
+        # Step 4: LLM后验证（纠正明显OCR错误）
+        if confidence < 0.9 and structured_data:
+            structured_data = _llm_post_correct(structured_data, ocr_text, ctx, llm_config)
+
+        logger.info(f"结构化提取完成，置信度: {confidence:.2f}, 布局感知字段: {list(layout_data.keys())}")
 
         return ModelExtractOutput(
             structured_data=structured_data,
@@ -364,8 +512,7 @@ def model_extract_node(
 
     except Exception as e:
         logger.warning(f"模型结构化提取失败: {str(e)}，降级到规则引擎")
-        # 降级到规则引擎 - ocr_text已在函数开头安全获取
-        rule_data = rule_based_extract(ocr_text, state.template_fields or [])
+        # 降级到规则引擎
         filled_count = sum(1 for v in rule_data.values() if v != "N/A")
         rule_confidence = filled_count / len(rule_data) if rule_data else 0.3
 
