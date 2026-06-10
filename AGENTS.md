@@ -1,9 +1,9 @@
 # PackCV-OCR 项目结构索引
 
 ## 项目概述
-- **名称**: PackCV-OCR V2.6
+- **名称**: PackCV-OCR V3.0
 - **功能**: 面向货架/包装场景的高精度OCR识别解决方案
-- **核心升级**: RapidOCR(ONNX)主引擎 + Tesseract多PSM备选 + 竞品级后处理
+- **核心升级**: RapidOCR(ONNX)主引擎 + Tesseract多PSM备选 + 自适应预处理 + 多尺度OCR
 
 ### 核心特性
 - RapidOCR(ONNX)主引擎 + Tesseract多PSM扫描（PaddleOCR已禁用-OneDNN兼容性问题）
@@ -23,8 +23,8 @@
 |-------|---------|------|---------|---------|---------|
 | route_processing | `graphs/graph.py` | task | 路由处理模式（单图/批量） | single→image_preprocess, batch→batch_process | - |
 | batch_process | `graphs/nodes/batch_process_node.py` | task | 批量图片处理 | - | - |
-| image_preprocess | `graphs/nodes/image_preprocess_node.py` | task | 图像预处理（CLAHE+锐化+倾斜校正+S3上传） | - | - |
-| ocr_recognize | `graphs/nodes/ocr_recognize_node.py` | task | 多引擎OCR + IoU去重 + 阅读排序 + 词汇校正 | - | - |
+| image_preprocess | `graphs/nodes/image_preprocess_node.py` | task | 自适应预处理（质量评估→CLAHE/二值化/自动曝光）+倾斜校正+S3上传 | - | - |
+| ocr_recognize | `graphs/nodes/ocr_recognize_node.py` | task | 多引擎OCR + 多尺度检测 + IoU去重 + 阅读排序 + 中文词汇校正 | - | - |
 | correct_text | `graphs/nodes/correct_text_node.py` | agent | LLM智能纠错 | - | `config/correct_text_llm_cfg.json` |
 | model_extract | `graphs/nodes/model_extract_node.py` | agent | LLM结构化提取 + 增强规则引擎降级 | - | `config/model_extract_llm_cfg.json` |
 | qa_answer | `graphs/nodes/qa_answer_node.py` | agent | 语义问答 | - | `config/qa_answer_llm_cfg.json` |
@@ -47,11 +47,23 @@
 RapidOCR(置信度≥0.3) → Tesseract(中英→纯英) → 原始图像回退
 
 ## 预处理管线
-1. 大图智能缩放（最大边≤2000px）
-2. 倾斜校正（霍夫变换直线检测）
-3. CLAHE对比度增强（Lab空间亮度通道处理）
-4. Unsharp Masking锐化
-5. 上传S3供OCR节点下载
+1. 大图智能缩放（最大边≤2000px→自适应多档位800/1200/1500/2000px）
+2. **图像质量评估**（拉普拉斯方差/亮度/对比度/边缘密度）
+3. **自适应策略选择**：
+   - 正常→CLAHE+锐化
+   - 偏暗→Gamma校正+CLAHE+锐化
+   - 模糊→强锐化+CLAHE
+   - 低对比度→高CLAHE+二值化
+4. 倾斜校正（霍夫变换直线检测）
+5. 多尺度OCR检测（1x+0.5x双通道融合）
+6. 上传S3供OCR节点下载
+
+## 后处理管线（竞品级）
+1. IoU去重（交并比>0.5的相邻文本框合并）
+2. 阅读顺序排序（Y轴分组→X轴排序）
+3. 置信度过滤（阈值0.15，保留低置信度有效文本）
+4. 中文词汇校正（50+常见OCR错误纠正）
+5. 段落合并（Y坐标邻近的文本合并为段落）
 
 ## FAQ
 ### 为什么有些字段返回N/A？
@@ -63,9 +75,12 @@ RapidOCR(置信度≥0.3) → Tesseract(中英→纯英) → 原始图像回退
 - 11个提取字段：brand, product_name, specification, production_date, shelf_life, manufacturer, ingredients, standard, batch_number, license_number, storage_condition
 - 中英文双语正则支持（Brand/Product/Manufacturer/Shelf Life等英文标签）
 - 关联校验：生产日期+保质期→自动计算到期日期
-- 100+品牌直接匹配模式
-- 多格式日期/规格/标准号正则
+- 200+品牌直接匹配模式（含金龙鱼/海天/蒙牛/伊利等）
+- 多格式日期/规格/标准号正则（YYYY/MM/DD、YYYY-MM-DD、YYYY年MM月DD日）
 - 许可证号支持10-14位SC编号
+- 食品生产资质SC编号专用模式
+- 中文OCR词汇校正（日→月、0→O、l→1等常见混淆）
+- 厂商名规范化（YiHaijiaLi→YiHaiJiaLi等）
 
 ## 依赖包
 - rapidocr-onnxruntime>=1.4.4 (OCR主引擎)

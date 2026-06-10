@@ -1,15 +1,16 @@
 # -*- coding: utf-8 -*-
 """
-图像预处理节点 - 深度优化版 V2.3
-RapidOCR自带文本检测+方向分类+识别，预处理节点只做轻量级增强
-1. 下载图片 → CLAHE对比度增强 + 轻度锐化 → 上传S3
-2. 如果增强失败，直接传递原始图片URL
+图像预处理节点 - 深度优化版 V2.5
+自适应图像质量评估 + 多策略预处理管线
+1. 质量评估：模糊检测/亮度/对比度/文本密度
+2. 自适应策略选择：普通/暗图/模糊/低对比度/高对比度
+3. CLAHE对比度增强 + 倾斜校正 + Unsharp锐化
 """
 import os
 import time
 import logging
 import requests
-from typing import Optional, Dict, Any, Tuple
+from typing import Optional, Dict, Any, Tuple, List
 from io import BytesIO
 
 import cv2
@@ -52,6 +53,188 @@ def download_image(url: str) -> Optional[np.ndarray]:
     except Exception as e:
         logger.warning(f"图片下载失败: {e}")
         return None
+
+
+# ==================== 图像质量评估 ====================
+
+def assess_image_quality(img: np.ndarray) -> Dict[str, Any]:
+    """
+    多维图像质量评估
+    返回质量报告，指导自适应预处理策略选择
+    """
+    report: Dict[str, Any] = {
+        "blurry": False,
+        "too_dark": False,
+        "low_contrast": False,
+        "high_contrast": False,
+        "quality_score": 100.0,
+        "recommended_strategy": "normal"
+    }
+
+    if img is None or img.size == 0:
+        report["quality_score"] = 0
+        return report
+
+    h, w = img.shape[:2]
+    report["dimensions"] = {"width": w, "height": h}
+
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+
+    # 1. 模糊检测（Laplacian方差）
+    laplacian_var = cv2.Laplacian(gray, cv2.CV_64F).var()
+    report["laplacian_var"] = round(laplacian_var, 2)
+    if laplacian_var < 30:
+        report["blurry"] = True
+        report["quality_score"] -= 30
+    elif laplacian_var < 60:
+        report["blurry"] = False
+        report["quality_score"] -= 10
+
+    # 2. 亮度检测
+    mean_brightness = np.mean(gray)
+    report["mean_brightness"] = round(mean_brightness, 2)
+    if mean_brightness < 40:
+        report["too_dark"] = True
+        report["quality_score"] -= 25
+    elif mean_brightness < 80:
+        report["too_dark"] = False
+        report["quality_score"] -= 10
+
+    # 3. 对比度检测
+    contrast = np.std(gray)
+    report["contrast"] = round(contrast, 2)
+    if contrast < 30:
+        report["low_contrast"] = True
+        report["quality_score"] -= 20
+    elif contrast > 80:
+        report["high_contrast"] = True
+        report["quality_score"] -= 5
+
+    # 4. 边缘密度（文本区域占比）
+    try:
+        edges = cv2.Canny(gray, 50, 150)
+        edge_density = float(np.sum(edges > 0)) / (h * w)
+        report["edge_density"] = round(edge_density, 5)
+        if edge_density < 0.001:
+            report["quality_score"] -= 15  # 几乎无文本
+        elif edge_density < 0.01:
+            report["quality_score"] -= 5   # 少量文本
+    except Exception:
+        report["edge_density"] = 0.0
+
+    # 5. 自适应策略选择
+    if report["too_dark"] and report["low_contrast"]:
+        report["recommended_strategy"] = "dark_low_contrast"
+    elif report["blurry"] and report["low_contrast"]:
+        report["recommended_strategy"] = "blurry"
+    elif report["low_contrast"]:
+        report["recommended_strategy"] = "low_contrast"
+    elif report["too_dark"]:
+        report["recommended_strategy"] = "dark"
+    elif report["high_contrast"]:
+        report["recommended_strategy"] = "high_contrast"
+    else:
+        report["recommended_strategy"] = "normal"
+
+    report["quality_score"] = max(0, min(100, report["quality_score"]))
+    return report
+
+
+def adaptive_enhance(img: np.ndarray, strategy: str = "normal") -> np.ndarray:
+    """
+    根据质量评估策略选择不同的预处理管线
+    """
+    if img is None or img.size == 0:
+        return img
+
+    result = img.copy()
+    h, w = result.shape[:2]
+
+    # 大图缩放（所有策略通用）
+    max_dimension = 2000
+    if max(h, w) > max_dimension:
+        scale = max_dimension / max(h, w)
+        new_w = int(w * scale)
+        new_h = int(h * scale)
+        result = cv2.resize(result, (new_w, new_h), interpolation=cv2.INTER_AREA)
+        h, w = result.shape[:2]
+
+    # 倾斜校正（所有策略通用）
+    try:
+        result, _ = _detect_and_correct_skew(result)
+    except Exception:
+        pass
+
+    if strategy == "dark" or strategy == "dark_low_contrast":
+        # 暗图策略：伽马校正 → CLAHE → 锐化
+        try:
+            gray = cv2.cvtColor(result, cv2.COLOR_BGR2GRAY)
+            gamma = 0.7
+            gamma_correction = np.power(gray / 255.0, gamma).astype(np.float32) * 255.0
+            gamma_correction = np.clip(gamma_correction, 0, 255).astype(np.uint8)
+            # 伽马后再CLAHE
+            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+            enhanced_l = clahe.apply(gamma_correction)
+            result = cv2.cvtColor(cv2.merge([enhanced_l, 
+                cv2.split(cv2.cvtColor(result, cv2.COLOR_BGR2LAB))[1],
+                cv2.split(cv2.cvtColor(result, cv2.COLOR_BGR2LAB))[2]]), 
+                cv2.COLOR_LAB2BGR)
+        except Exception as e:
+            logger.warning(f"暗图增强策略失败: {e}")
+
+    elif strategy == "blurry":
+        # 模糊策略：强锐化 → CLAHE
+        try:
+            kernel = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]])
+            result = cv2.filter2D(result, -1, kernel)
+            lab = cv2.cvtColor(result, cv2.COLOR_BGR2LAB)
+            l, a, b = cv2.split(lab)
+            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+            l_enhanced = clahe.apply(l)
+            result = cv2.cvtColor(cv2.merge([l_enhanced, a, b]), cv2.COLOR_LAB2BGR)
+        except Exception as e:
+            logger.warning(f"模糊增强策略失败: {e}")
+
+    elif strategy == "low_contrast" or strategy == "dark_low_contrast":
+        # 低对比度策略：强CLAHE
+        try:
+            lab = cv2.cvtColor(result, cv2.COLOR_BGR2LAB)
+            l, a, b = cv2.split(lab)
+            clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8, 8))
+            l_enhanced = clahe.apply(l)
+            result = cv2.cvtColor(cv2.merge([l_enhanced, a, b]), cv2.COLOR_LAB2BGR)
+        except Exception as e:
+            logger.warning(f"低对比度增强策略失败: {e}")
+
+    elif strategy == "high_contrast":
+        # 高对比度策略（可能有局部曝光过度）：自适应直方图均衡化
+        try:
+            gray = cv2.cvtColor(result, cv2.COLOR_BGR2GRAY)
+            clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+            gray_eq = clahe.apply(gray)
+            result = cv2.cvtColor(gray_eq, cv2.COLOR_GRAY2BGR)
+        except Exception as e:
+            logger.warning(f"高对比度增强策略失败: {e}")
+
+    # default: 标准策略（所有情况都做轻度CLAHE+锐化）
+    try:
+        lab = cv2.cvtColor(result, cv2.COLOR_BGR2LAB)
+        l, a, b = cv2.split(lab)
+        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        l_enhanced = clahe.apply(l)
+        lab_enhanced = cv2.merge([l_enhanced, a, b])
+        result = cv2.cvtColor(lab_enhanced, cv2.COLOR_LAB2BGR)
+    except Exception as e:
+        logger.warning(f"标准CLAHE增强失败: {e}")
+
+    # 锐化（所有策略通用）
+    try:
+        gaussian = cv2.GaussianBlur(result, (0, 0), 2.0)
+        result = cv2.addWeighted(result, 1.5, gaussian, -0.5, 0)
+    except Exception as e:
+        logger.warning(f"锐化失败: {e}")
+
+    return result
 
 
 def _detect_and_correct_skew(img: np.ndarray) -> Tuple[np.ndarray, float]:
@@ -104,8 +287,8 @@ def _detect_and_correct_skew(img: np.ndarray) -> Tuple[np.ndarray, float]:
 
 def enhance_for_ocr(img: np.ndarray) -> Tuple[np.ndarray, Dict[str, Any]]:
     """
-    轻量级OCR预处理管线
-    RapidOCR内置文本检测+方向分类，预处理只需提供高质量输入
+    自适应OCR预处理管线
+    1. 质量评估 → 2. 自适应策略选择 → 3. 增强处理
     """
     info: Dict[str, Any] = {
         "original_size": img.shape[:2] if img is not None else (0, 0),
@@ -116,49 +299,22 @@ def enhance_for_ocr(img: np.ndarray) -> Tuple[np.ndarray, Dict[str, Any]]:
     if img is None or img.size == 0:
         return img, info
 
-    result = img.copy()
-    h, w = result.shape[:2]
+    # 1. 质量评估
+    quality_report = assess_image_quality(img)
+    strategy = quality_report.get("recommended_strategy", "normal")
+    info["quality_report"] = quality_report
+    info["strategy"] = strategy
+    logger.info(f"图像质量评估: score={quality_report['quality_score']}, "
+                f"strategy={strategy}, blurry={quality_report['blurry']}, "
+                f"dark={quality_report['too_dark']}, "
+                f"contrast={quality_report['contrast']}")
 
-    # 1. 大图智能缩放（RapidOCR推荐最大边不超过2000px）
-    max_dimension = 2000
-    if max(h, w) > max_dimension:
-        scale = max_dimension / max(h, w)
-        new_w = int(w * scale)
-        new_h = int(h * scale)
-        result = cv2.resize(result, (new_w, new_h), interpolation=cv2.INTER_AREA)
-        info["resized"] = True
-        info["resize_scale"] = round(scale, 3)
-        logger.info(f"大图缩放: {w}x{h} -> {new_w}x{new_h}")
+    # 2. 自适应增强
+    result = adaptive_enhance(img, strategy)
 
-    # 2. 倾斜校正（拍照歪斜补偿）
-    try:
-        result, skew_angle = _detect_and_correct_skew(result)
-        if abs(skew_angle) > 0.5:
-            info["rotation_angle"] = round(skew_angle, 2)
-            logger.info(f"图像旋转校正: {skew_angle:.2f}度")
-    except Exception as e:
-        logger.warning(f"倾斜校正异常: {e}")
-
-    # 3. CLAHE对比度增强（Lab空间处理亮度通道）
-    try:
-        lab = cv2.cvtColor(result, cv2.COLOR_BGR2LAB)
-        l_channel, a_channel, b_channel = cv2.split(lab)
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
-        l_enhanced = clahe.apply(l_channel)
-        lab_enhanced = cv2.merge([l_enhanced, a_channel, b_channel])
-        result = cv2.cvtColor(lab_enhanced, cv2.COLOR_LAB2BGR)
-        info["enhanced"] = True
-    except Exception as e:
-        logger.warning(f"CLAHE增强失败: {e}")
-
-    # 3. 轻度锐化（Unsharp Masking）
-    try:
-        gaussian = cv2.GaussianBlur(result, (0, 0), 2.0)
-        result = cv2.addWeighted(result, 1.5, gaussian, -0.5, 0)
-    except Exception as e:
-        logger.warning(f"锐化失败: {e}")
-
+    info["enhanced"] = True
     info["output_size"] = result.shape[:2]
+
     return result, info
 
 

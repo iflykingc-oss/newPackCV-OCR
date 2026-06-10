@@ -243,6 +243,107 @@ def ocr_with_tesseract_multi_psm(img: np.ndarray, lang: str = "chi_sim+eng") -> 
     return best_text, best_conf
 
 
+# ==================== 多尺度OCR检测 ====================
+
+def multi_scale_ocr(img: np.ndarray) -> Tuple[str, float, List[Dict[str, Any]]]:
+    """
+    多尺度OCR检测：
+    1. 原始尺度 1x 检测（通用）
+    2. 小图 0.5x 检测（捕获大文字）
+    3. 融合去重合并结果
+    """
+    if not _RAPID_OCR_AVAILABLE:
+        return "", 0.0, []
+
+    h, w = img.shape[:2]
+    all_texts: List[str] = []
+    all_confs: List[float] = []
+    all_regions: List[Dict[str, Any]] = []
+
+    # 尺度1: 原始尺度
+    text1, conf1, regions1 = ocr_with_rapid(img)
+    if text1:
+        all_texts.append(text1)
+        all_confs.append(conf1)
+        all_regions.extend(regions1)
+        logger.info(f"多尺度1x: {len(regions1)}行, conf={conf1:.4f}")
+
+    # 尺度2: 0.5x（原始过大时启用，捕获大文字）
+    if max(h, w) > 1000:
+        try:
+            small_h, small_w = h // 2, w // 2
+            img_small = cv2.resize(img, (small_w, small_h), interpolation=cv2.INTER_AREA)
+            text2, conf2, regions2 = ocr_with_rapid(img_small)
+            if text2 and regions2:
+                # 坐标还原到原始尺寸
+                for r in regions2:
+                    bbox = r.get("bbox", [])
+                    if len(bbox) == 4:
+                        r["bbox"] = [bbox[0] * 2, bbox[1] * 2, bbox[2] * 2, bbox[3] * 2]
+                # 对0.5x结果去重（如果与1x高度重叠则跳过）
+                merged_regions = _merge_regions(all_regions, regions2, iou_threshold=0.3)
+                if len(merged_regions) > len(all_regions):
+                    all_regions = merged_regions
+                    for r in regions2:
+                        if r not in all_regions:
+                            all_texts.append(r.get("text", ""))
+                            all_confs.append(r.get("confidence", 0.0))
+                    logger.info(f"多尺度0.5x: {len(regions2)}行新增, 总计{len(all_regions)}行")
+                else:
+                    logger.info(f"多尺度0.5x: {len(regions2)}行, 全部重复跳过")
+        except Exception as e:
+            logger.warning(f"多尺度0.5x失败: {e}")
+
+    # 最终后处理
+    if not all_regions:
+        return "", 0.0, []
+
+    final_texts = [r["text"] for r in all_regions]
+    final_confs = [r["confidence"] for r in all_regions]
+    full_text, avg_conf, processed = post_process_ocr_results(final_texts, final_confs, all_regions)
+
+    return full_text, avg_conf, processed
+
+
+def _merge_regions(
+    regions_a: List[Dict[str, Any]],
+    regions_b: List[Dict[str, Any]],
+    iou_threshold: float = 0.3
+) -> List[Dict[str, Any]]:
+    """合并两个区域列表，基于IoU去重"""
+    merged = list(regions_a)
+    for r_b in regions_b:
+        is_dup = False
+        bbox_b = r_b.get("bbox", [])
+        for r_a in regions_a:
+            bbox_a = r_a.get("bbox", [])
+            if _compute_iou(bbox_a, bbox_b) > iou_threshold:
+                is_dup = True
+                break
+        if not is_dup:
+            merged.append(r_b)
+    return merged
+
+
+def _compute_iou(bbox_a: List, bbox_b: List) -> float:
+    """计算两个bbox的交并比"""
+    if len(bbox_a) != 4 or len(bbox_b) != 4:
+        return 0.0
+    # [x1, y1, x2, y2]
+    x1 = max(bbox_a[0], bbox_b[0])
+    y1 = max(bbox_a[1], bbox_b[1])
+    x2 = min(bbox_a[2], bbox_b[2])
+    y2 = min(bbox_a[3], bbox_b[3])
+    if x2 <= x1 or y2 <= y1:
+        return 0.0
+    inter = (x2 - x1) * (y2 - y1)
+    area_a = (bbox_a[2] - bbox_a[0]) * (bbox_a[3] - bbox_a[1])
+    area_b = (bbox_b[2] - bbox_b[0]) * (bbox_b[3] - bbox_b[1])
+    if area_a + area_b - inter <= 0:
+        return 0.0
+    return inter / float(area_a + area_b - inter)
+
+
 # ==================== 多引擎融合 ====================
 
 def multi_engine_ocr(img: np.ndarray, time_budget: float = 30.0) -> Tuple[str, float, List[Dict[str, Any]], str]:
@@ -253,11 +354,11 @@ def multi_engine_ocr(img: np.ndarray, time_budget: float = 30.0) -> Tuple[str, f
     """
     start = time.time()
 
-    # 第一优先级: RapidOCR（推荐引擎 - 优先选用）
+    # 第一优先级: RapidOCR多尺度检测（推荐引擎 - 支持大/小文字）
     rapid_text, rapid_conf, rapid_regions = "", 0.0, []
     rapid_text_len = 0
     if _RAPID_OCR_AVAILABLE:
-        text, conf, regions = ocr_with_rapid(img)
+        text, conf, regions = multi_scale_ocr(img)
         if text:
             rapid_text, rapid_conf, rapid_regions = text, conf, regions
             rapid_text_len = len(text)
@@ -489,6 +590,7 @@ def post_process_ocr_text(text: str) -> str:
 
     # 常见OCR错误词汇校正（包装场景）
     word_corrections: Dict[str, str] = {
+        # English corrections
         "Storrge": "Storage",
         "storrge": "storage",
         "Storge": "Storage",
@@ -509,6 +611,31 @@ def post_process_ocr_text(text: str) -> str:
         "Adress": "Address",
         "adress": "address",
         "YiHaijiaLi": "YiHaiJiaLi",
+        # Chinese common OCR corrections
+        "已期": "日期",
+        "日朋": "日期",
+        "月月": "月",
+        "曰": "日",
+        "末": "未",
+        "己": "已",
+        "配料表": "配料表",
+        "配科": "配料",
+        "食月油": "食用油",
+        "植物月旨": "植物脂", 
+        "添如剂": "添加剂",
+        "食品添如剂": "食品添加剂",
+        "净含世": "净含量",
+        "净含鲎": "净含量",
+        "上产曰期": "生产日期",
+        "上产厂商": "生产厂商",
+        "保质朋": "保质期",
+        "保质朞": "保质期",
+        "生产厂高": "生产厂商",
+        "阴京": "阴凉",
+        "阴京干燥": "阴凉干燥",
+        "储藏": "储藏",
+        "批身": "批次",
+        "批兮": "批次",
     }
 
     lines = text.split('\n')
