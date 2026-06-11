@@ -719,18 +719,95 @@ def ocr_recognize_node(
 
     logger.info(f"图片下载成功: shape={img.shape}, dtype={img.dtype}")
 
-    # 大图缩放（加速OCR推理）
+    # 质量感知缩放：低质量图不下采样，保留像素信息
     h, w = img.shape[:2]
     max_dim = 1500
-    if max(h, w) > max_dim:
+    min_dim = min(h, w)
+    
+    # 检查图像质量
+    gray_check = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+    lap_var = cv2.Laplacian(gray_check, cv2.CV_64F).var()
+    is_low_quality = lap_var < 30 or min_dim < 500
+    
+    if max(h, w) > max_dim and not is_low_quality:
         scale = max_dim / max(h, w)
         new_w = int(w * scale)
         new_h = int(h * scale)
         img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
-        logger.info(f"大图缩放: {w}x{h} -> {new_w}x{new_h}")
+        logger.info(f"大图缩放: {w}x{h} -> {new_w}x{new_h} (质量正常)")
+    elif max(h, w) > max_dim and is_low_quality:
+        # 低质量图只缩放到max_dim+50%，保留更多像素
+        relaxed_max = int(max_dim * 1.5)
+        if max(h, w) > relaxed_max:
+            scale = relaxed_max / max(h, w)
+            new_w = int(w * scale)
+            new_h = int(h * scale)
+            img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+            logger.info(f"低质量图弱缩放: {w}x{h} -> {new_w}x{new_h}")
+        else:
+            logger.info(f"低质量图跳过缩放: {w}x{h}, lap_var={lap_var:.1f}")
+    elif is_low_quality:
+        logger.info(f"图片质量较低，保留原始尺寸: {w}x{h}, lap_var={lap_var:.1f}")
+    else:
+        logger.info(f"图片质量正常: {w}x{h}, lap_var={lap_var:.1f}")
 
     # 多引擎融合OCR
     final_text, final_conf, ocr_regions, engine = multi_engine_ocr(img)
+
+    # ====== 如果第一遍OCR为空，自动尝试多种重试策略 ======
+    if not final_text and img is not None:
+        logger.info("OCR首遍为空，尝试多种重试策略...")
+        try:
+            gray_retry = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+            retry_strategies = [
+                ("otsu", None),
+                ("adaptive_gaussian", None),
+                ("clahe_otsu", None),
+            ]
+            
+            for strategy_name, _ in retry_strategies:
+                if strategy_name == "otsu":
+                    _, binary = cv2.threshold(gray_retry, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                elif strategy_name == "adaptive_gaussian":
+                    binary = cv2.adaptiveThreshold(gray_retry, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                                    cv2.THRESH_BINARY, 31, 10)
+                else:  # clahe_otsu
+                    clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8, 8))
+                    enhanced = clahe.apply(gray_retry)
+                    _, binary = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                
+                binary_img = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
+                retry_text, retry_conf, retry_regions, retry_engine = multi_engine_ocr(binary_img)
+                if retry_text:
+                    final_text, final_conf, ocr_regions, engine = retry_text, retry_conf, retry_regions, f"retry_{strategy_name}"
+                    logger.info(f"重试成功: strategy={strategy_name}, text_len={len(final_text)}")
+                    break
+        except Exception as e:
+            logger.warning(f"二值化重试失败: {e}")
+
+    # ====== 如果仍然为空，尝试2x上采样+二值化重试 ======
+    if not final_text and img is not None:
+        logger.info("OCR仍然为空，尝试2x上采样重试...")
+        try:
+            h_up, w_up = img.shape[:2]
+            upscaled = cv2.resize(img, (w_up * 2, h_up * 2), interpolation=cv2.INTER_CUBIC)
+            up_text, up_conf, up_regions, up_engine = multi_engine_ocr(upscaled)
+            if up_text:
+                final_text, final_conf, ocr_regions, engine = up_text, up_conf, up_regions, f"upscale_{up_engine}"
+                logger.info(f"上采样重试成功: text_len={len(final_text)}, conf={up_conf:.4f}")
+            else:
+                # 上采样后做CLAHE+OTSU再OCR
+                up_gray = cv2.cvtColor(upscaled, cv2.COLOR_BGR2GRAY)
+                clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8, 8))
+                enhanced = clahe.apply(up_gray)
+                _, binary = cv2.threshold(enhanced, 0, 255, cv2.THRESH_BINARY + cv2.THRESH_OTSU)
+                binary_up = cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR)
+                up_text, up_conf, up_regions, up_engine = multi_engine_ocr(binary_up)
+                if up_text:
+                    final_text, final_conf, ocr_regions, engine = up_text, up_conf, up_regions, "upscale_otsu"
+                    logger.info(f"上采样+OTSU重试成功: text_len={len(final_text)}, conf={up_conf:.4f}")
+        except Exception as e:
+            logger.warning(f"上采样重试失败: {e}")
 
     # 如果预处理后图片识别为空，尝试原始图片
     if not final_text:

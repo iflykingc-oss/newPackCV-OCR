@@ -143,12 +143,47 @@ def assess_image_quality(img: np.ndarray) -> Dict[str, Any]:
 def adaptive_enhance(img: np.ndarray, strategy: str = "normal") -> np.ndarray:
     """
     根据质量评估策略选择不同的预处理管线
+    增强版：去噪 + 形态学文本增强 + 多级CLAHE
     """
     if img is None or img.size == 0:
         return img
 
     result = img.copy()
     h, w = result.shape[:2]
+
+    # ====== 极低质量图超分辨率上采样 ======
+    # 当图片较小或非常模糊时，通过上采样增加文字像素密度
+    try:
+        gray_check = cv2.cvtColor(result, cv2.COLOR_BGR2GRAY)
+        lap_var = cv2.Laplacian(gray_check, cv2.CV_64F).var()
+        contrast_val = np.std(gray_check)
+        min_dim = min(h, w)
+        
+        # 上采样触发条件：小图 或 模糊 或 低对比度
+        needs_upscale = False
+        upscale_factor = 1.0
+        
+        if min_dim < 800:
+            needs_upscale = True
+            upscale_factor = max(1.5, 1600.0 / min_dim)
+        elif lap_var < 40 and min_dim < 1200:
+            needs_upscale = True
+            upscale_factor = 1.5
+        elif contrast_val < 15:
+            needs_upscale = True
+            upscale_factor = 1.5
+        
+        # 限制最大上采样倍数
+        upscale_factor = min(upscale_factor, 3.0)
+        
+        if needs_upscale and upscale_factor > 1.1:
+            new_h = int(h * upscale_factor)
+            new_w = int(w * upscale_factor)
+            result = cv2.resize(result, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+            h, w = result.shape[:2]
+            logger.info(f"低质量图上采样: orig={int(h/upscale_factor)}x{int(w/upscale_factor)} -> {w}x{h} (factor={upscale_factor:.1f}, lap={lap_var:.0f}, contrast={contrast_val:.0f})")
+    except Exception as e:
+        logger.warning(f"上采样失败: {e}")
 
     # 大图缩放（所有策略通用）
     max_dimension = 2000
@@ -159,6 +194,31 @@ def adaptive_enhance(img: np.ndarray, strategy: str = "normal") -> np.ndarray:
         result = cv2.resize(result, (new_w, new_h), interpolation=cv2.INTER_AREA)
         h, w = result.shape[:2]
 
+    # ====== 步骤1：去噪（预处理核心，所有策略通用）======
+    try:
+        # 轻度双边滤波保边去噪，不损失边缘
+        result = cv2.bilateralFilter(result, d=5, sigmaColor=30, sigmaSpace=30)
+        # 对特别差的图片再加一次快速去噪
+        if strategy in ("dark_low_contrast", "blurry", "dark"):
+            result = cv2.fastNlMeansDenoisingColored(result, None, h=10, hColor=10, 
+                                                      templateWindowSize=7, searchWindowSize=21)
+    except Exception as e:
+        logger.warning(f"去噪步骤失败: {e}")
+
+    # ====== 步骤2：形态学文本增强 ======
+    try:
+        if strategy in ("blurry", "dark", "dark_low_contrast"):
+            # 对模糊/暗图：先提取边缘，再增强文本区域
+            gray = cv2.cvtColor(result, cv2.COLOR_BGR2GRAY)
+            # 使用形态学梯度增强文字边缘
+            kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+            gradient = cv2.morphologyEx(gray, cv2.MORPH_GRADIENT, kernel)
+            # 合并梯度图与原图
+            result = cv2.addWeighted(cv2.cvtColor(gray, cv2.COLOR_GRAY2BGR), 0.7,
+                                      cv2.cvtColor(gradient, cv2.COLOR_GRAY2BGR), 0.3, 0)
+    except Exception as e:
+        logger.warning(f"形态学增强失败: {e}")
+
     # 倾斜校正（所有策略通用）
     try:
         result, _ = _detect_and_correct_skew(result)
@@ -166,48 +226,61 @@ def adaptive_enhance(img: np.ndarray, strategy: str = "normal") -> np.ndarray:
         pass
 
     if strategy == "dark" or strategy == "dark_low_contrast":
-        # 暗图策略：伽马校正 → CLAHE → 锐化
+        # 暗图策略：强伽马校正 → CLAHE → 锐化
         try:
             gray = cv2.cvtColor(result, cv2.COLOR_BGR2GRAY)
-            gamma = 0.7
+            gamma = 0.6 if strategy == "dark_low_contrast" else 0.7
             gamma_correction = np.power(gray / 255.0, gamma).astype(np.float32) * 255.0
             gamma_correction = np.clip(gamma_correction, 0, 255).astype(np.uint8)
             # 伽马后再CLAHE
-            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+            clahe = cv2.createCLAHE(clipLimit=3.5, tileGridSize=(8, 8))
             enhanced_l = clahe.apply(gamma_correction)
-            result = cv2.cvtColor(cv2.merge([enhanced_l, 
-                cv2.split(cv2.cvtColor(result, cv2.COLOR_BGR2LAB))[1],
-                cv2.split(cv2.cvtColor(result, cv2.COLOR_BGR2LAB))[2]]), 
-                cv2.COLOR_LAB2BGR)
+            result_gray = cv2.cvtColor(result, cv2.COLOR_BGR2GRAY)
+            # 用伽马+CLAHE结果替换原图亮度
+            result = cv2.cvtColor(enhanced_l, cv2.COLOR_GRAY2BGR)
         except Exception as e:
             logger.warning(f"暗图增强策略失败: {e}")
 
     elif strategy == "blurry":
-        # 模糊策略：强锐化 → CLAHE
+        # 模糊策略：强锐化 → CLAHE + 自适应阈值
         try:
+            # 强拉普拉斯锐化
             kernel = np.array([[-1, -1, -1], [-1, 9, -1], [-1, -1, -1]])
             result = cv2.filter2D(result, -1, kernel)
+            # Unsharp Masking二次锐化
+            gaussian = cv2.GaussianBlur(result, (0, 0), 1.5)
+            result = cv2.addWeighted(result, 1.8, gaussian, -0.8, 0)
+            # CLAHE
             lab = cv2.cvtColor(result, cv2.COLOR_BGR2LAB)
             l, a, b = cv2.split(lab)
-            clahe = cv2.createCLAHE(clipLimit=3.0, tileGridSize=(8, 8))
+            clahe = cv2.createCLAHE(clipLimit=3.5, tileGridSize=(8, 8))
             l_enhanced = clahe.apply(l)
             result = cv2.cvtColor(cv2.merge([l_enhanced, a, b]), cv2.COLOR_LAB2BGR)
         except Exception as e:
             logger.warning(f"模糊增强策略失败: {e}")
 
     elif strategy == "low_contrast" or strategy == "dark_low_contrast":
-        # 低对比度策略：强CLAHE
+        # 低对比度策略：强CLAHE + 对比度拉伸
         try:
             lab = cv2.cvtColor(result, cv2.COLOR_BGR2LAB)
             l, a, b = cv2.split(lab)
-            clahe = cv2.createCLAHE(clipLimit=4.0, tileGridSize=(8, 8))
+            # 自适应clipLimit
+            contrast_val = np.std(l)
+            clip_limit = 4.0 if contrast_val < 20 else 3.0
+            clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(8, 8))
             l_enhanced = clahe.apply(l)
-            result = cv2.cvtColor(cv2.merge([l_enhanced, a, b]), cv2.COLOR_LAB2BGR)
+            # 对比度拉伸
+            min_val, max_val = np.percentile(l_enhanced, (5, 95))
+            if max_val > min_val:
+                l_stretched = np.clip((l_enhanced.astype(np.float32) - min_val) * 
+                                       255.0 / (max_val - min_val), 0, 255).astype(np.uint8)
+            else:
+                l_stretched = l_enhanced
+            result = cv2.cvtColor(cv2.merge([l_stretched, a, b]), cv2.COLOR_LAB2BGR)
         except Exception as e:
             logger.warning(f"低对比度增强策略失败: {e}")
 
     elif strategy == "high_contrast":
-        # 高对比度策略（可能有局部曝光过度）：自适应直方图均衡化
         try:
             gray = cv2.cvtColor(result, cv2.COLOR_BGR2GRAY)
             clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
@@ -216,18 +289,34 @@ def adaptive_enhance(img: np.ndarray, strategy: str = "normal") -> np.ndarray:
         except Exception as e:
             logger.warning(f"高对比度增强策略失败: {e}")
 
-    # default: 标准策略（所有情况都做轻度CLAHE+锐化）
+    # ====== 标准CLAHE（所有策略通用）======
     try:
         lab = cv2.cvtColor(result, cv2.COLOR_BGR2LAB)
         l, a, b = cv2.split(lab)
-        clahe = cv2.createCLAHE(clipLimit=2.0, tileGridSize=(8, 8))
+        # 根据对比度自适应clipLimit
+        contrast_val = np.std(l)
+        clip_limit = 3.0 if contrast_val < 30 else 2.0
+        clahe = cv2.createCLAHE(clipLimit=clip_limit, tileGridSize=(8, 8))
         l_enhanced = clahe.apply(l)
         lab_enhanced = cv2.merge([l_enhanced, a, b])
         result = cv2.cvtColor(lab_enhanced, cv2.COLOR_LAB2BGR)
     except Exception as e:
         logger.warning(f"标准CLAHE增强失败: {e}")
 
-    # 锐化（所有策略通用）
+    # ====== 自适应阈值二值化（仅对极差图片）======
+    if strategy in ("dark_low_contrast", "blurry"):
+        try:
+            gray = cv2.cvtColor(result, cv2.COLOR_BGR2GRAY)
+            # 自适应阈值生成二值化辅助通道
+            binary = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                            cv2.THRESH_BINARY, 31, 5)
+            # 混合原图和二值化结果（保持自然感的同时增强文字）
+            result = cv2.addWeighted(result, 0.6, 
+                                      cv2.cvtColor(binary, cv2.COLOR_GRAY2BGR), 0.4, 0)
+        except Exception as e:
+            logger.warning(f"自适应二值化失败: {e}")
+
+    # ====== 最终锐化（所有策略通用）======
     try:
         gaussian = cv2.GaussianBlur(result, (0, 0), 2.0)
         result = cv2.addWeighted(result, 1.5, gaussian, -0.5, 0)
