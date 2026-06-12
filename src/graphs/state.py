@@ -177,6 +177,7 @@ class ModelExtractOutput(BaseModel):
     structured_data: Dict[str, Any] = Field(default_factory=dict, description="提取的结构化数据")
     confidence: float = Field(default=0.0, description="提取置信度")
     missing_fields: List[str] = Field(default_factory=list, description="缺失字段列表")
+    product_type: str = Field(default="", description="产品类型：食品/饮料/日化/个人护理/药品/电子产品/其他")
 
 
 # ==================== 智能纠错节点 ====================

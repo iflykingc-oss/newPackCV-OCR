@@ -181,6 +181,16 @@ def rule_based_extract(ocr_text: str, template_fields: List[str]) -> Dict[str, A
                     result[field] = match.group(0).strip()
                     break
 
+    # ==================== 自由格式文本提取（无标签场景） ====================
+    # 检测是否为自由格式文本（规则引擎几乎没提取到任何字段）
+    filled_fields = [k for k, v in result.items() if v and v != "N/A"]
+    # 如果提取结果大部分为空，尝试自由格式提取
+    if len(filled_fields) <= 1:
+        free_form_result = _free_form_extract(ocr_text)
+        for key, value in free_form_result.items():
+            if value and value != "N/A":
+                result[key] = value
+
     # ==================== 关联校验 ====================
     # 如果有生产日期和保质期，计算到期日期
     if "production_date" in result and "shelf_life" in result:
@@ -205,6 +215,200 @@ def rule_based_extract(ocr_text: str, template_fields: List[str]) -> Dict[str, A
         for field in all_rules:
             if field not in default_fields and field not in result:
                 result[field] = "N/A"
+
+    return result
+
+
+def _free_form_extract(ocr_text: str) -> Dict[str, Any]:
+    """
+    自由格式文本提取 - 处理无标签的包装文字（如湿巾、日化品正面）
+    通过文本模式匹配直接提取品牌、产品名、成分、特点等
+    """
+    result: Dict[str, Any] = {}
+
+    if not ocr_text.strip():
+        return result
+
+    lines = [line.strip() for line in ocr_text.split('\n') if line.strip()]
+
+    # ===== 产品类型检测 =====
+    product_keywords = {
+        "湿巾|湿纸巾|清洁巾|擦手巾|棉柔巾|洗脸巾": "湿巾",
+        "纸巾|抽纸|面巾纸|餐巾纸|手帕纸": "纸巾",
+        "洗发水|洗发露|洗发乳|洗发液|洗发膏|洗发精": "洗发水",
+        "沐浴露|沐浴乳|沐浴液|沐浴|沐浴泡泡": "沐浴露",
+        "洗面奶|洁面乳|洁面泡沫|洗面乳|洁面膏": "洗面奶",
+        "护肤霜|护肤乳|面霜|乳液|润肤乳|身体乳": "护肤品",
+        "洗衣液|洗衣粉|洗衣凝珠|洗衣皂": "洗衣液",
+        "洗手液|洗手露|洗手泡沫": "洗手液",
+        "牙膏|牙粉|漱口水|牙线": "牙膏",
+        "消毒液|消毒水|除菌液|抗菌液": "消毒液",
+        "矿泉水|纯净水|饮用水|苏打水": "饮用水",
+        "饮料|果汁|茶饮|奶茶|乳酸菌": "饮料",
+        "饼干|糕点|面包|蛋糕|点心|酥": "饼干糕点",
+        "巧克力|糖果|口香糖|棒棒糖": "糖果",
+        "牛奶|酸奶|纯奶|鲜奶|奶粉": "乳制品",
+        "酱油|醋|料酒|蚝油|调味料|酱": "调味品",
+        "食用油|花生油|菜籽油|橄榄油|调和油": "食用油",
+        "大米|面粉|面条|米粉|挂面|杂粮": "粮食",
+    }
+
+    product_type = ""
+    full_text_all = "".join(lines)
+    for pattern, ptype in product_keywords.items():
+        if re.search(pattern, full_text_all):
+            product_type = ptype
+            break
+
+    # ===== 品牌提取（自由格式） =====
+    # 使用逐行搜索，避免跨行拼接导致的错误匹配
+    brands = []
+
+    # 先逐行搜索：英中文混合品牌 "Dafi答菲", "NIVEA妮维雅"
+    for line in lines:
+        # 允许中间有空格或没有空格
+        m = re.search(r'([A-Z][a-zA-Z0-9]{1,15}[\s]?[\u4e00-\u9fa5]{2,6})', line)
+        if m:
+            candidate = m.group(1).strip()
+            # 过滤掉明显不是品牌的匹配（如"MINUS无酒精"这种跨词组合）
+            # 检查前半部分是否像品牌（有大小写字母）
+            eng_part = re.match(r'^[A-Z][a-zA-Z0-9]+', candidate)
+            chn_part = re.search(r'[\u4e00-\u9fa5]{2,}$', candidate)
+            if eng_part and chn_part:
+                brands.append(candidate)
+
+        # 也搜中文在前英文在后
+        m = re.search(r'([\u4e00-\u9fa5]{2,6}[A-Z][a-zA-Z0-9]{0,10})', line)
+        if m:
+            candidate = m.group(1).strip()
+            brands.append(candidate)
+
+    # 仍没找到：尝试纯中文2-6字品牌
+    if not brands:
+        for line in lines:
+            # 去掉标点和英文数字
+            pure_cn = re.sub(r'[A-Za-z0-9\s+\-—()（）「」【】\[\]《》<>：:，。,.。!！?？""\'\"''/\\\\]', '', line).strip()
+            if 2 <= len(pure_cn) <= 6 and pure_cn:
+                if not any(kw in pure_cn for kw in '的、了、是、在、有、和、就、不、人、都、而、及、与、着、或、一个、没有、我们、可以、这个、那个、什么、怎么'):
+                    brands.append(pure_cn)
+                    break
+
+    # 仍没找到：尝试行首单个英文品牌（如 "Dafi", "NIVEA"）
+    if not brands:
+        for line in lines[:3]:
+            m = re.match(r'^([A-Z][a-z]{2,15})$', line.strip())
+            if m:
+                brands.append(m.group(1))
+                break
+
+    if brands:
+        result["brand"] = brands[0].strip()
+    else:
+        # Try single English word brand (like "Dafi", "NIVEA" etc.)
+        eng_brand_match = re.search(r'^([A-Z][a-z]{2,10})$', lines[0] if lines else "", re.MULTILINE)
+        if eng_brand_match:
+            result["brand"] = eng_brand_match.group(1)
+
+    # ===== 产品名称提取 =====
+    if product_type:
+        if result.get("brand"):
+            result["product_name"] = f"{result['brand']}{product_type}"
+        else:
+            result["product_name"] = product_type
+
+    # Try to find product name in first few lines
+    for line in lines[:4]:
+        # Check if line contains product keywords
+        for pattern, ptype in product_keywords.items():
+            m = re.search(pattern, line)
+            if m:
+                match_text = m.group(0)
+                # Try to get full product name (text before the keyword)
+                prefix = line[:line.index(match_text)].strip()
+                if prefix:
+                    result["product_name"] = f"{prefix}{match_text}"
+                break
+        if "product_name" in result:
+            break
+
+    # ===== 成分/配料提取（自由格式） =====
+    ingredient_keywords = [
+        r'(?:水|纯水|纯净水|去离子水|EDI纯水|超纯水)',
+        r'(?:甘油|丙二醇|透明质酸|玻尿酸|烟酰胺|维E|维生素E|维生素C|VC|神经酰胺|角鲨烷|氨基酸|水杨酸|果酸|乳酸|尿素|尿囊素|泛醇|苯氧乙醇|尼泊金酯|甲基异噻唑啉酮|MIT|CMIT|DMDM乙内酰脲|碘丙炔醇丁基氨甲酸酯|苯甲酸钠|山梨酸钾|脱氢乙酸钠|双氧水|过氧化氢|次氯酸|次氯酸钠|乙醇|异丙醇|芦荟|洋甘菊|茶树|薰衣草|金盏花)',
+        r'(?:Purified[\s]+water[\s]*|purified[\s]+water[\s]*|aqua[\s]*|Glycerin[\s]*|Glycerol[\s]*|Propylene[\s]+Glycol[\s]*|Butylene[\s]+Glycol[\s]*|Hyaluronic[\s]+Acid[\s]*|Sodium[\s]+Hyaluronate[\s]*|Niacinamide[\s]*|Tocopherol[\s]*|Vitamin[\s]+[CEB][\s]*|Ceramide[\s]*|Squalane[\s]*|Amino[\s]+Acid[\s]*|Salicylic[\s]+Acid[\s]*|Lactic[\s]+Acid[\s]*|Aloe[\s]+Vera[\s]*|Chamomile[\s]*|Green[\s]+Tea[\s]*|Panthenol[\s]*|Phenoxyethanol[\s]*|Ethylhexylglycerin[\s]*|Caprylyl[\s]+Glycol[\s]*)',
+    ]
+
+    ingredients_found = []
+    for line in lines:
+        # 跳过"无XX"模式——表示不含该成分
+        if re.match(r'^无', line.strip()):
+            continue
+        for pattern in ingredient_keywords:
+            matches = re.findall(pattern, line, re.IGNORECASE)
+            for m in matches:
+                cleaned = m.strip()
+                if cleaned and cleaned not in ingredients_found:
+                    ingredients_found.append(cleaned)
+
+    if ingredients_found:
+        result["ingredients"] = "，".join(ingredients_found[:8])
+
+    # ===== 产品特点/卖点提取 =====
+    # 提取所有看起来像卖点的短句
+    feature_lines = []
+
+    # 排除的噪音模式（OCR伪影）
+    noise_patterns = [
+        r'^[\+\-]+\s*[A-Za-z]+\s*$', r'^[A-Za-z]{1,3}\s*[\+\-]+\s*[A-Za-z]*\s*$',
+        r'^r[\-\s]*j', r'^[\+\-][Jj]', r'^I\+', r'^[A-Z][a-z]?[\-\s][Jj]',
+        r'^\d+$', r'^[\+\-]+$', r'^[A-Za-z\s]+$',
+    ]
+
+    for line in lines:
+        # 跳过明显的噪点行
+        is_noise = False
+        for np in noise_patterns:
+            if re.match(np, line.strip(), re.IGNORECASE):
+                is_noise = True
+                break
+        if is_noise:
+            continue
+
+        cleaned = line.strip()
+        # 清理行首的中继噪点
+        cleaned = re.sub(r'^[\+\-]+\s*[A-Za-z]*\s*', '', cleaned).strip()
+        cleaned = re.sub(r'^[A-Za-z]{1,3}\s*[\+\-]+\s*', '', cleaned).strip()
+        cleaned = re.sub(r'^r[\-\s]*j[\s\-]*[A-Za-z]*', '', cleaned, flags=re.IGNORECASE).strip()
+        cleaned = re.sub(r'^[\+\-][Jj][A-Za-z]*', '', cleaned).strip()
+
+        if cleaned and len(cleaned) >= 4 and cleaned not in feature_lines:
+            # Not just numbers or English-only
+            has_chinese = bool(re.search(r'[\u4e00-\u9fa5]', cleaned))
+            if has_chinese:
+                feature_lines.append(cleaned)
+
+    if feature_lines:
+        # 去重+排除已提取为品牌/产品名的内容
+        unique_features = []
+        brand_name = result.get("brand", "")
+        product_name = result.get("product_name", "")
+        exclude_texts = [brand_name, product_name] if brand_name or product_name else []
+        for f in feature_lines:
+            # 排除品牌和产品名
+            if any(exclude in f or f in exclude for exclude in exclude_texts):
+                continue
+            if not any(f in uf or uf in f for uf in unique_features):
+                unique_features.append(f)
+        result["features"] = "，".join(unique_features[:8])
+
+    # ===== 规格提取（自由格式） =====
+    spec_match = re.search(r'(\d+\.?\d*\s*(?:L|l|ml|mL|g|G|kg|KG|片|抽|层|包|袋|盒|瓶|罐|支|条|枚|张))', full_text_all)
+    if spec_match:
+        result["specification"] = spec_match.group(1).strip()
+
+    # 检测时标注产品类型
+    if product_type:
+        result["product_type"] = product_type
 
     return result
 
@@ -502,12 +706,16 @@ def model_extract_node(
         if confidence < 0.9 and structured_data:
             structured_data = _llm_post_correct(structured_data, ocr_text, ctx, llm_config)
 
-        logger.info(f"结构化提取完成，置信度: {confidence:.2f}, 布局感知字段: {list(layout_data.keys())}")
+        # 提取产品类型
+        product_type = structured_data.pop("product_type", "") if isinstance(structured_data, dict) else ""
+
+        logger.info(f"结构化提取完成，置信度: {confidence:.2f}, 产品类型: {product_type or '未知'}, 布局感知字段: {list(layout_data.keys())}")
 
         return ModelExtractOutput(
             structured_data=structured_data,
             confidence=confidence,
-            missing_fields=missing_fields
+            missing_fields=missing_fields,
+            product_type=product_type
         )
 
     except Exception as e:
@@ -520,5 +728,6 @@ def model_extract_node(
         return ModelExtractOutput(
             structured_data=rule_data,
             confidence=rule_confidence,
-            missing_fields=[f for f in rule_data if rule_data[f] == "N/A"]
+            missing_fields=[f for f in rule_data if rule_data[f] == "N/A"],
+            product_type=""
         )
