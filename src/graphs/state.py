@@ -241,6 +241,24 @@ class ResultOutputOutput(BaseModel):
     platform_push_result: Dict[str, Any] = Field(default_factory=dict, description="平台推送结果")
 
 
+# ==================== 飞书通知节点 ====================
+
+class FeishuNotifyInput(BaseModel):
+    """飞书通知节点输入"""
+    structured_data: Dict[str, Any] = Field(default_factory=dict, description="结构化提取的数据")
+    raw_text: Optional[str] = Field(default="", description="OCR原始识别文本")
+    corrected_text: Optional[str] = Field(default="", description="纠错后的文本")
+    qa_answer: Optional[str] = Field(default="", description="语义问答答案")
+    answer: Optional[str] = Field(default="", description="问答答案（兼容字段）")
+    export_file_url: Optional[str] = Field(default=None, description="导出文件URL")
+    platform: Literal["wechat", "feishu", "none"] = Field(default="none", description="目标平台：仅feishu时发送")
+
+
+class FeishuNotifyOutput(BaseModel):
+    """飞书通知节点输出"""
+    platform_push_result: Dict[str, Any] = Field(default_factory=dict, description="飞书推送结果")
+
+
 # ==================== 路由处理节点 ====================
 
 class RouteProcessingInput(BaseModel):

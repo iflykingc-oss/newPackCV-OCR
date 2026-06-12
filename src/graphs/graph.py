@@ -27,6 +27,7 @@ from graphs.nodes.correct_text_node import correct_text_node
 from graphs.nodes.qa_answer_node import qa_answer_node
 from graphs.nodes.result_output_node import result_output_node
 from graphs.nodes.batch_process_node import batch_process_node
+from graphs.nodes.feishu_notify_node import feishu_notify_node
 
 
 def route_processing_mode(state: GlobalState) -> str:
@@ -87,6 +88,7 @@ builder.add_node("correct_text", correct_text_node,
 builder.add_node("qa_answer", qa_answer_node,
                  metadata={"type": "agent", "llm_cfg": "config/qa_answer_llm_cfg.json"})
 builder.add_node("result_output", result_output_node)
+builder.add_node("feishu_notify", feishu_notify_node)
 
 # 设置入口点（路由节点）
 builder.set_entry_point("route_processing")
@@ -111,8 +113,11 @@ builder.add_edge("correct_text", "model_extract")
 builder.add_edge("model_extract", "qa_answer")
 builder.add_edge("qa_answer", "result_output")
 
-# 结果输出 -> 结束
-builder.add_edge("result_output", END)
+# 结果输出 -> 飞书通知
+builder.add_edge("result_output", "feishu_notify")
+
+# 飞书通知 -> 结束
+builder.add_edge("feishu_notify", END)
 
 # 编译图
 main_graph = builder.compile()
