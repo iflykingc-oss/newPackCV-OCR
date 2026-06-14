@@ -126,6 +126,7 @@ class OCRRecognizeInput(BaseModel):
     image: Optional[File] = Field(default=None, description="待识别图片（可能是原始图或预处理图）")
     package_image: Optional[File] = Field(default=None, description="原始包装图片")
     preprocessed_image: Optional[File] = Field(default=None, description="预处理后的图片")
+    processing_info: Optional[Dict[str, Any]] = Field(default=None, description="预处理阶段的质量评估信息")
     ocr_engine_type: Literal["builtin", "api", "rapidocr", "paddleocr", "tesseract"] = Field(default="builtin", description="OCR引擎类型")
     ocr_api_config: Optional[Dict[str, Any]] = Field(default=None, description="OCR API配置")
 

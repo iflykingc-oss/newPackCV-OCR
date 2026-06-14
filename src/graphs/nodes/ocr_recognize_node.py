@@ -12,9 +12,12 @@ import os
 import time
 import logging
 import re
+import hashlib
+import json
 import requests
 from typing import List, Dict, Any, Optional, Tuple
 from io import BytesIO
+from collections import OrderedDict
 
 import cv2
 import numpy as np
@@ -27,6 +30,30 @@ from graphs.state import OCRRecognizeInput, OCRRecognizeOutput
 from utils.file.file import File
 
 logger = logging.getLogger(__name__)
+
+# ==================== OCR结果缓存 ====================
+# LRU缓存：避免重复处理相同图片
+_OCR_CACHE_MAX_SIZE = 50
+_ocr_cache: OrderedDict = OrderedDict()
+
+def _cache_key(image_url: str, quality_score: float) -> str:
+    """生成缓存key（URL hash + 质量分）"""
+    raw = f"{image_url}|{quality_score:.0f}"
+    return hashlib.md5(raw.encode()).hexdigest()
+
+def _get_cached(key: str) -> Optional[Tuple[str, float, List[Dict[str, Any]], str]]:
+    """从LRU缓存获取"""
+    if key in _ocr_cache:
+        _ocr_cache.move_to_end(key)
+        logger.info(f"OCR缓存命中: {key[:12]}")
+        return _ocr_cache[key]
+    return None
+
+def _set_cache(key: str, value: Tuple[str, float, List[Dict[str, Any]], str]):
+    """写入LRU缓存"""
+    _ocr_cache[key] = value
+    if len(_ocr_cache) > _OCR_CACHE_MAX_SIZE:
+        _ocr_cache.popitem(last=False)
 
 # ==================== 引擎可用性检测 ====================
 
@@ -719,37 +746,64 @@ def ocr_recognize_node(
 
     logger.info(f"图片下载成功: shape={img.shape}, dtype={img.dtype}")
 
-    # 质量感知缩放：低质量图不下采样，保留像素信息
+    # ====== 检查缓存 ======
+    quality_score = 50.0  # 默认中等
+    if state.processing_info:
+        quality_score = state.processing_info.get("quality_score", 50.0)
+    cache_key_str = _cache_key(image_url, quality_score)
+    cached = _get_cached(cache_key_str)
+    if cached:
+        cached_text, cached_conf, cached_regions, cached_engine = cached
+        elapsed = time.time() - start_time
+        logger.info(f"缓存命中! 耗时={elapsed:.2f}s (text_len={len(cached_text)}, conf={cached_conf:.3f})")
+        return OCRRecognizeOutput(
+            raw_text=cached_text,
+            ocr_confidence=cached_conf,
+            ocr_regions=cached_regions,
+            engine_used=f"cache_{cached_engine}",
+            processing_time=elapsed
+        )
+
+    # ====== 质量分级处理 ======
+    # 质量好(score>70) → 单次RapidOCR + 不缩放
+    # 质量中(40-70) → 正常缩放 + 多引擎
+    # 质量差(<40) → 弱缩放 + 多引擎 + 上采样重试
     h, w = img.shape[:2]
     max_dim = 1500
     min_dim = min(h, w)
-    
-    # 检查图像质量
     gray_check = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
     lap_var = cv2.Laplacian(gray_check, cv2.CV_64F).var()
-    is_low_quality = lap_var < 30 or min_dim < 500
-    
-    if max(h, w) > max_dim and not is_low_quality:
-        scale = max_dim / max(h, w)
-        new_w = int(w * scale)
-        new_h = int(h * scale)
-        img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
-        logger.info(f"大图缩放: {w}x{h} -> {new_w}x{new_h} (质量正常)")
-    elif max(h, w) > max_dim and is_low_quality:
-        # 低质量图只缩放到max_dim+50%，保留更多像素
-        relaxed_max = int(max_dim * 1.5)
-        if max(h, w) > relaxed_max:
-            scale = relaxed_max / max(h, w)
+    is_low_quality = quality_score < 40 or lap_var < 30 or min_dim < 500
+    is_high_quality = quality_score >= 70 and lap_var >= 80 and min_dim >= 600
+
+    if is_high_quality:
+        # 高质量图：单次OCR，不缩放，跳过重试
+        logger.info(f"高质量图: score={quality_score:.0f}, lap_var={lap_var:.1f}, 快速模式")
+        final_text, final_conf, ocr_regions, engine = multi_engine_ocr(img)
+        ocr_retried = False
+    else:
+        # 中/低质量图：原有完整逻辑
+        if max(h, w) > max_dim and not is_low_quality:
+            scale = max_dim / max(h, w)
             new_w = int(w * scale)
             new_h = int(h * scale)
-            img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
-            logger.info(f"低质量图弱缩放: {w}x{h} -> {new_w}x{new_h}")
+            img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_AREA)
+            logger.info(f"大图缩放: {w}x{h} -> {new_w}x{new_h} (质量正常)")
+        elif max(h, w) > max_dim and is_low_quality:
+            # 低质量图只缩放到max_dim+50%，保留更多像素
+            relaxed_max = int(max_dim * 1.5)
+            if max(h, w) > relaxed_max:
+                scale = relaxed_max / max(h, w)
+                new_w = int(w * scale)
+                new_h = int(h * scale)
+                img = cv2.resize(img, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+                logger.info(f"低质量图弱缩放: {w}x{h} -> {new_w}x{new_h}")
+            else:
+                logger.info(f"低质量图跳过缩放: {w}x{h}, lap_var={lap_var:.1f}")
+        elif is_low_quality:
+            logger.info(f"图片质量较低，保留原始尺寸: {w}x{h}, lap_var={lap_var:.1f}")
         else:
-            logger.info(f"低质量图跳过缩放: {w}x{h}, lap_var={lap_var:.1f}")
-    elif is_low_quality:
-        logger.info(f"图片质量较低，保留原始尺寸: {w}x{h}, lap_var={lap_var:.1f}")
-    else:
-        logger.info(f"图片质量正常: {w}x{h}, lap_var={lap_var:.1f}")
+            logger.info(f"图片质量正常: {w}x{h}, lap_var={lap_var:.1f}")
 
     # 多引擎融合OCR
     final_text, final_conf, ocr_regions, engine = multi_engine_ocr(img)
@@ -835,6 +889,10 @@ def ocr_recognize_node(
 
     elapsed_time = time.time() - start_time
     logger.info(f"OCR完成: 引擎={engine}, 耗时={elapsed_time:.2f}s, 文本长度={len(final_text)}, 置信度={final_conf:.4f}")
+
+    # 写入缓存（非空结果）
+    if final_text and len(final_text) > 5:
+        _set_cache(cache_key_str, (final_text, final_conf, ocr_regions, engine))
 
     return OCRRecognizeOutput(
         raw_text=final_text,

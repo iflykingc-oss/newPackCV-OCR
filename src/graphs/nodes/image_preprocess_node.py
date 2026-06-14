@@ -391,14 +391,25 @@ def enhance_for_ocr(img: np.ndarray) -> Tuple[np.ndarray, Dict[str, Any]]:
     # 1. 质量评估
     quality_report = assess_image_quality(img)
     strategy = quality_report.get("recommended_strategy", "normal")
+    quality_score = quality_report.get("quality_score", 50)
     info["quality_report"] = quality_report
     info["strategy"] = strategy
-    logger.info(f"图像质量评估: score={quality_report['quality_score']}, "
+    info["quality_score"] = quality_score
+    logger.info(f"图像质量评估: score={quality_score}, "
                 f"strategy={strategy}, blurry={quality_report['blurry']}, "
                 f"dark={quality_report['too_dark']}, "
                 f"contrast={quality_report['contrast']}")
 
-    # 2. 自适应增强
+    # 2. 质量分级跳过预处理：高质量图（score > 70）直接返回原图
+    #    大幅提升识别速度，避免过度处理
+    if quality_score >= 70:
+        logger.info(f"图片质量良好(score={quality_score})，跳过预处理增强")
+        info["enhanced"] = False
+        info["skip_reason"] = "quality_good"
+        info["output_size"] = img.shape[:2]
+        return img, info
+
+    # 3. 自适应增强（仅中低质量图需要）
     result = adaptive_enhance(img, strategy)
 
     info["enhanced"] = True
