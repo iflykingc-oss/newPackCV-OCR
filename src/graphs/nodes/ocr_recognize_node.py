@@ -32,8 +32,8 @@ from utils.file.file import File
 logger = logging.getLogger(__name__)
 
 # ==================== OCR结果缓存 ====================
-# LRU缓存：避免重复处理相同图片
-_OCR_CACHE_MAX_SIZE = 50
+# LRU缓存：避免重复处理相同图片（增大至200，适合批量场景）
+_OCR_CACHE_MAX_SIZE = 200
 _ocr_cache: OrderedDict = OrderedDict()
 
 def _cache_key(image_url: str, quality_score: float) -> str:
@@ -270,6 +270,174 @@ def ocr_with_tesseract_multi_psm(img: np.ndarray, lang: str = "chi_sim+eng") -> 
     return best_text, best_conf
 
 
+# ==================== 布局分析（Direction ①） ====================
+
+def _layout_column_detection(img: np.ndarray, gap_ratio_thresh: float = 0.08) -> List[Dict[str, Any]]:
+    """
+    基于垂直投影的列布局检测
+    返回区域列表：[{"x1": ..., "x2": ..., "y1": ..., "y2": ...}, ...]
+    """
+    h, w = img.shape[:2]
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+
+    # 二值化
+    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
+    # 垂直投影：每列的非零像素数
+    v_proj = np.sum(binary, axis=0) // 255
+
+    # 找出空白列（近乎无文字的列）
+    max_proj = np.max(v_proj) if np.max(v_proj) > 0 else 1
+    blank_cols = v_proj < (max_proj * 0.02)
+
+    # 合并相邻空白列 → 空白区域
+    gaps: List[Tuple[int, int]] = []
+    in_gap = False
+    gap_start = 0
+    for col in range(w):
+        if blank_cols[col] and not in_gap:
+            in_gap = True
+            gap_start = col
+        elif not blank_cols[col] and in_gap:
+            in_gap = False
+            gap_width = col - gap_start
+            if gap_width > w * gap_ratio_thresh:  # 足够的间隔才视为列分割
+                gaps.append((gap_start, col))
+    if in_gap and (w - gap_start) > w * gap_ratio_thresh:
+        gaps.append((gap_start, w))
+
+    if not gaps:
+        return [{"x1": 0, "x2": w, "y1": 0, "y2": h}]  # 单列
+
+    # 按空白区域分割为多个列区域
+    regions = []
+    prev_end = 0
+    for gs, ge in gaps:
+        if ge - prev_end > 20:  # 忽略太小的区域
+            regions.append({"x1": prev_end, "x2": gs, "y1": 0, "y2": h})
+        prev_end = ge
+    if w - prev_end > 20:
+        regions.append({"x1": prev_end, "x2": w, "y1": 0, "y2": h})
+
+    # 如果没有有效区域，回退到整图
+    if not regions:
+        return [{"x1": 0, "x2": w, "y1": 0, "y2": h}]
+
+    return regions
+
+
+def _layout_section_detection(img: np.ndarray) -> List[Dict[str, Any]]:
+    """
+    水平投影段落检测：识别不同内容区域（标题区/成分区/表格式区域）
+    """
+    h, w = img.shape[:2]
+    gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY) if len(img.shape) == 3 else img
+    _, binary = cv2.threshold(gray, 0, 255, cv2.THRESH_BINARY_INV + cv2.THRESH_OTSU)
+
+    # 水平投影
+    h_proj = np.sum(binary, axis=1) // 255
+
+    # 平滑投影
+    kernel_size = max(1, h // 50)
+    h_proj_smooth = np.convolve(h_proj, np.ones(kernel_size) / kernel_size, mode='same')
+
+    max_proj = np.max(h_proj_smooth) if np.max(h_proj_smooth) > 0 else 1
+    text_rows = h_proj_smooth > (max_proj * 0.05)
+
+    # 合并相邻行 → 段落
+    sections: List[Tuple[int, int]] = []
+    in_section = False
+    sec_start = 0
+    for row in range(h):
+        if text_rows[row] and not in_section:
+            in_section = True
+            sec_start = row
+        elif not text_rows[row] and in_section:
+            in_section = False
+            if row - sec_start > 15:  # 忽略太小的段落
+                sections.append((sec_start, row))
+    if in_section and (h - sec_start) > 15:
+        sections.append((sec_start, h))
+
+    # 转换为区域格式
+    regions = []
+    for ys, ye in sections:
+        # 每个段落也考虑列分割
+        col_regions = _layout_column_detection(img[ys:ye, :, :] if len(img.shape) == 3 else img[ys:ye, :])
+        for cr in col_regions:
+            regions.append({"x1": cr["x1"], "x2": cr["x2"], "y1": ys + cr["y1"], "y2": ys + cr.get("y2", ye)})
+
+    if not regions:
+        return [{"x1": 0, "x2": w, "y1": 0, "y2": h}]
+
+    return regions
+
+
+def _layout_aware_ocr(img: np.ndarray) -> Tuple[str, float, List[Dict[str, Any]]]:
+    """
+    布局感知OCR：先检测版面布局，再分区域OCR，最后合并结果
+    解决多列文本混淆、表格混入等问题
+    """
+    h, w = img.shape[:2]
+
+    # 第一步：列检测（判断是否是分栏布局）
+    col_regions = _layout_column_detection(img)
+
+    if len(col_regions) <= 1:
+        # 单列 → 进一步做段落检测 + 直接OCR
+        sec_regions = _layout_section_detection(img)
+        if len(sec_regions) <= 3:  # 段落少，直接整图OCR
+            return multi_scale_ocr(img)
+        else:
+            # 分段落OCR，结果按阅读顺序合并
+            all_texts = []
+            all_confs = []
+            all_regions = []
+            for sec in sec_regions:
+                sub_img = img[sec["y1"]:sec["y2"], sec["x1"]:sec["x2"]]
+                if sub_img.shape[0] < 10 or sub_img.shape[1] < 10:
+                    continue
+                text, conf, regions = multi_scale_ocr(sub_img)
+                if text and conf > 0:
+                    # 调整坐标到原图
+                    for r in regions:
+                        bbox = r.get("bbox", [])
+                        if len(bbox) >= 4:
+                            r["bbox"] = [bbox[0] + sec["x1"], bbox[1] + sec["y1"],
+                                          bbox[2] + sec["x1"], bbox[3] + sec["y1"]]
+                    all_texts.append(text)
+                    all_confs.append(conf)
+                    all_regions.extend(regions)
+            merged_text = "\n".join(all_texts) if all_texts else ""
+            avg_conf = np.mean(all_confs) if all_confs else 0
+            return merged_text, float(avg_conf), all_regions
+    else:
+        # 多列 → 每列独立OCR → 按阅读顺序合并（先左后右）
+        all_texts = []
+        all_confs = []
+        all_regions = []
+        col_regions.sort(key=lambda r: r["x1"])  # 先左后右
+
+        for cr in col_regions:
+            sub_img = img[cr["y1"]:cr["y2"], cr["x1"]:cr["x2"]]
+            if sub_img.shape[0] < 10 or sub_img.shape[1] < 10:
+                continue
+            text, conf, regions = multi_scale_ocr(sub_img)
+            if text and conf > 0:
+                for r in regions:
+                    bbox = r.get("bbox", [])
+                    if len(bbox) >= 4:
+                        r["bbox"] = [bbox[0] + cr["x1"], bbox[1] + cr["y1"],
+                                      bbox[2] + cr["x1"], bbox[3] + cr["y1"]]
+                all_texts.append(text)
+                all_confs.append(conf)
+                all_regions.extend(regions)
+
+        merged_text = "\n".join(all_texts) if all_texts else ""
+        avg_conf = np.mean(all_confs) if all_confs else 0
+        return merged_text, float(avg_conf), all_regions
+
+
 # ==================== 多尺度OCR检测 ====================
 
 def multi_scale_ocr(img: np.ndarray) -> Tuple[str, float, List[Dict[str, Any]]]:
@@ -381,11 +549,11 @@ def multi_engine_ocr(img: np.ndarray, time_budget: float = 30.0) -> Tuple[str, f
     """
     start = time.time()
 
-    # 第一优先级: RapidOCR多尺度检测（推荐引擎 - 支持大/小文字）
+    # 第一优先级: 布局感知RapidOCR（多列检测 + 多尺度融合）
     rapid_text, rapid_conf, rapid_regions = "", 0.0, []
     rapid_text_len = 0
     if _RAPID_OCR_AVAILABLE:
-        text, conf, regions = multi_scale_ocr(img)
+        text, conf, regions = _layout_aware_ocr(img)
         if text:
             rapid_text, rapid_conf, rapid_regions = text, conf, regions
             rapid_text_len = len(text)

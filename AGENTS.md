@@ -1,16 +1,18 @@
 # PackCV-OCR 项目结构索引
 
 ## 项目概述
-- **名称**: PackCV-OCR V4.3
+- **名称**: PackCV-OCR V5.0
 - **功能**: 面向货架/包装场景的高精度OCR识别解决方案 (全品类通用)
-- **核心升级**: RapidOCR(ONNX)主引擎 + 自适应5策略预处理 + 多尺度检测 + 布局感知KV提取 + LLM后验证 + 全品类自由格式提取 + 飞书机器人 + HTTP API服务
+- **核心升级**: RapidOCR(ONNX)主引擎 + 自适应5策略预处理 + 多尺度检测 + 布局感知KV提取 + LLM后验证 + 全品类自由格式提取 + 专线营养表提取 + 投影法布局分析 + 小字超分增强 + 飞书机器人 + HTTP API服务
 
 ### 核心特性
 - RapidOCR(ONNX)主引擎 + Tesseract多PSM扫描（PaddleOCR已禁用-OneDNN兼容性问题）
 - 自定义RapidOCR优化配置（config/rapidocr_optimized.yaml）
 - **自适应5策略预处理（正常/暗图/模糊/低对比/强文本）+拉普拉斯质量评估**
 - **质量分级处理：高质量图（score>70）跳过预处理增强+单次OCR快速通过**
-- **OCR结果缓存（LRU 50条，相同URL秒级返回）**
+- **OCR结果缓存（LRU 200条，相同URL秒级返回）**
+- **Direction ② 小字超分辨率增强：形态学梯度检测小字区域→自动2x-3x上采样+自适应二值化增强**
+- **Direction ① 投影法布局分析：垂直投影检测列间隙→水平投影检测行间隙→多区域独立OCR→结果合并**
 - **极低质量图上采样（1.5x~3x INTER_CUBIC）+双边滤波去噪+形态学文本增强**
 - **多尺度OCR检测（1x原始+0.5x小图双通道融合）**
 - **竞品级后处理管线：IoU去重→Y轴阅读顺序排序→置信度过滤→词汇校正**
@@ -18,10 +20,12 @@
 - **LLM后验证纠错：低置信度时自动LLM修正**
 - **OCR重试机制：二值化（OTSU/自适应/CLAHE-OTSU）+ 2x上采样**
 - **中文词汇校正字典（80+模式：日/月、0/O、l/1、254%/25.4%等常见混淆）**
+- **Direction ③ 营养表专用提取器：行列检测→行识别→结构化营养键值对输出**
 - **智能倾斜校正（霍夫变换直线检测+自动旋转）**
 - **增强型规则引擎（12个字段、中英文双语正则、关联校验）**
 - **效期检测与到期日自动计算**
 - **报表生成与导出（JSON/Excel/PDF）**
+- **Direction ⑤ 图片格式扩展：HEIC/WebP/BMP/TIFF自动转换**
 
 ## 节点清单
 
@@ -29,10 +33,10 @@
 |-------|---------|------|---------|---------|---------|
 | route_processing | `graphs/graph.py` | task | 路由处理模式（单图/批量） | single→image_preprocess, batch→batch_process | - |
 | batch_process | `graphs/nodes/batch_process_node.py` | task | 批量图片处理 | - | - |
-| image_preprocess | `graphs/nodes/image_preprocess_node.py` | task | **自适应增强**：质量评估→5策略选择→双边滤波去噪→形态学梯度→伽马校正→CLAHE→自适应二值化→上采样→锐化→倾斜校正+S3上传 | - | - |
-| ocr_recognize | `graphs/nodes/ocr_recognize_node.py` | task | **增强OCR**：质量感知缩放+多尺度(1x/0.5x)RapidOCR+Tesseract备选+二值化重试(3种)+2x上采样重试+IoU去重+Y轴阅读排序+中文词汇校正(80+模式)+LRU缓存 | - | `config/rapidocr_optimized.yaml` |
+| image_preprocess | `graphs/nodes/image_preprocess_node.py` | task | **自适应增强**：质量评估→5策略→**D②小字检测放大**→**D⑤格式转换**→双边滤波去噪→形态学梯度→伽马校正→CLAHE→自适应二值化→上采样→锐化→倾斜校正+S3上传 | - | - |
+| ocr_recognize | `graphs/nodes/ocr_recognize_node.py` | task | **增强OCR**：**D①投影布局分析(列检测→多区域OCR)**→质量感知缩放→多尺度(1x/0.5x)RapidOCR+Tesseract备选→**D④缓存200条优化**→二值化重试(3种)→2x上采样重试→IoU去重→Y轴阅读排序→中文词汇校正(80+模式) | - | `config/rapidocr_optimized.yaml` |
 | correct_text | `graphs/nodes/correct_text_node.py` | agent | LLM智能纠错 | - | `config/correct_text_llm_cfg.json` |
-| model_extract | `graphs/nodes/model_extract_node.py` | agent | **全品类自适应提取**：产品类型自动分类(食品/日化/饮料)+布局感知KV提取+12字段食品规则+OCR容错标签匹配(三产→生产)+品牌列表直接匹配+多行配料跨行捕获+规格营养表排除+自由格式文本提取(无标签场景)+LLM后验证 | - | `config/model_extract_llm_cfg.json` |
+| model_extract | `graphs/nodes/model_extract_node.py` | agent | **全品类自适应提取**：产品类型自动分类(食品/日化/饮料)+布局感知KV提取+12字段食品规则+OCR容错标签匹配(三产→生产)+品牌直接匹配+多行配料跨行捕获+规格排除+**D③营养表专用提取器(行列解析→结构化键值对)**+自由格式提取+LLM后验证 | - | `config/model_extract_llm_cfg.json` |
 | qa_answer | `graphs/nodes/qa_answer_node.py` | agent | 语义问答（5段结构化分析+参考来源标注） | - | `config/qa_answer_llm_cfg.json` |
 | result_output | `graphs/nodes/result_output_node.py` | task | 结果输出（JSON/Excel/PDF+平台推送） | - | - |
 | feishu_notify | `graphs/nodes/feishu_notify_node.py` | task | **飞书通知**：结构化数据→飞书机器人交互式卡片推送（含字段统计+导出链接+智能问答） | - | - |

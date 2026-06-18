@@ -39,17 +39,45 @@ def _get_s3_storage() -> S3SyncStorage:
 
 
 def download_image(url: str) -> Optional[np.ndarray]:
-    """下载图片并转为OpenCV格式"""
+    """下载图片并转为OpenCV格式，支持多种图片格式转换"""
     try:
         headers = {
             "User-Agent": "Mozilla/5.0 (Windows NT 10.0; Win64; x64) AppleWebKit/537.36"
         }
         resp = requests.get(url, timeout=30, headers=headers)
         resp.raise_for_status()
-        pil_img = Image.open(BytesIO(resp.content))
-        if pil_img.mode != 'RGB':
-            pil_img = pil_img.convert('RGB')
-        return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+
+        # Direction ⑤：多格式兼容 — 尝试用PIL识别并转换所有主流格式
+        raw_bytes = BytesIO(resp.content)
+        try:
+            pil_img = Image.open(raw_bytes)
+            # 自动转换RGBA/CMYK/P等非RGB模式
+            if pil_img.mode in ('RGBA', 'LA', 'PA'):
+                # 透明背景填充白色
+                bg = Image.new('RGB', pil_img.size, (255, 255, 255))
+                if pil_img.mode == 'RGBA':
+                    bg.paste(pil_img, mask=pil_img.split()[3])
+                else:
+                    pil_img = pil_img.convert('RGBA')
+                    bg.paste(pil_img, mask=pil_img.split()[3])
+                pil_img = bg
+            elif pil_img.mode != 'RGB':
+                pil_img = pil_img.convert('RGB')
+
+            # 限制最大尺寸（防止超大图片导致OOM）
+            max_dim = 4096
+            if pil_img.width > max_dim or pil_img.height > max_dim:
+                scale = max_dim / max(pil_img.width, pil_img.height)
+                new_w = int(pil_img.width * scale)
+                new_h = int(pil_img.height * scale)
+                pil_img = pil_img.resize((new_w, new_h), getattr(Image, 'LANCZOS', getattr(Image, 'ANTIALIAS', 1)))
+                logger.info(f"图片缩放至 {(new_w, new_h)}（原尺寸过大）")
+
+            return cv2.cvtColor(np.array(pil_img), cv2.COLOR_RGB2BGR)
+        except Exception as pil_err:
+            logger.warning(f"PIL解析失败({pil_err})，尝试兜底")
+            # 兜底：直接按JPEG解码
+            return cv2.imdecode(np.frombuffer(resp.content, np.uint8), cv2.IMREAD_COLOR)
     except Exception as e:
         logger.warning(f"图片下载失败: {e}")
         return None
@@ -193,6 +221,55 @@ def adaptive_enhance(img: np.ndarray, strategy: str = "normal") -> np.ndarray:
         new_h = int(h * scale)
         result = cv2.resize(result, (new_w, new_h), interpolation=cv2.INTER_AREA)
         h, w = result.shape[:2]
+
+    # ====== Direction ②：小字区域检测与增强 ======
+    try:
+        gray_check = cv2.cvtColor(result, cv2.COLOR_BGR2GRAY)
+        # 形态学梯度检测边缘密度
+        grad_kernel = cv2.getStructuringElement(cv2.MORPH_RECT, (3, 3))
+        gradient = cv2.morphologyEx(gray_check, cv2.MORPH_GRADIENT, grad_kernel)
+        # 二值化边缘
+        _, edge_binary = cv2.threshold(gradient, 20, 255, cv2.THRESH_BINARY)
+
+        # 计算小尺度边缘占比（用较小结构元素检测细节）
+        detail_density = np.sum(edge_binary > 0) / (h * w)
+
+        # 文字尺寸估算：检测轮廓的平均高度
+        contours, _ = cv2.findContours(edge_binary, cv2.RETR_EXTERNAL, cv2.CHAIN_APPROX_SIMPLE)
+        text_heights = []
+        for cnt in contours:
+            _, _, _, ch = cv2.boundingRect(cnt)
+            if 4 < ch < 30:  # 小到中等文字高度
+                text_heights.append(ch)
+        avg_text_h = np.mean(text_heights) if text_heights else 0
+
+        # 小字判断：平均文字高度 < 12px 或 细节密度 > 15%
+        has_small_text = avg_text_h < 12 and detail_density > 0.08
+
+        if has_small_text and avg_text_h > 4:
+            # 对小字图片做二次放大（针对小字场景专用）
+            small_text_scale = max(1.5, min(3.0, 16.0 / max(avg_text_h, 1)))
+            if small_text_scale > 1.2:
+                new_h = int(h * small_text_scale)
+                new_w = int(w * small_text_scale)
+                result = cv2.resize(result, (new_w, new_h), interpolation=cv2.INTER_CUBIC)
+                h, w = result.shape[:2]
+                logger.info(f"小字增强: upscale={small_text_scale:.1f}x, avg_h={avg_text_h:.0f}px, density={detail_density:.2f}")
+
+        # 对小字场景额外用自适应二值化增强对比度
+        if has_small_text:
+            gray = cv2.cvtColor(result, cv2.COLOR_BGR2GRAY)
+            # 小核自适应阈值（对小文字更敏感）
+            block_size = max(11, 15 if avg_text_h > 8 else 11)
+            if block_size % 2 == 0:
+                block_size += 1
+            adaptive = cv2.adaptiveThreshold(gray, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C,
+                                             cv2.THRESH_BINARY, block_size, 4)
+            # 与原图融合（保留颜色信息但增强文字边缘）
+            color_enhanced = cv2.addWeighted(result, 0.6, cv2.cvtColor(adaptive, cv2.COLOR_GRAY2BGR), 0.4, 0)
+            result = color_enhanced
+    except Exception as e:
+        logger.warning(f"小字增强跳过: {e}")
 
     # ====== 步骤1：去噪（预处理核心，所有策略通用）======
     try:
