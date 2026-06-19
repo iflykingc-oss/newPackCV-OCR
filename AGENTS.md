@@ -551,3 +551,70 @@ image_preprocess → image_quality_enhance → text_curvature_correct → image_
 | 全语种评测 | GlotOCR-Bench(158种文字系统, 超10语言准确率陡降) | arXiv 2026.04 |
 | VL全品类理解 | MiniCPM-o(8B, 1.8MP, 30+语言, 640tokens) / InternVL(4K分辨率) | OpenBMB 2025 |
 | 低质量增强 | ESRGAN(超分) / RetinexNet(低光) / Real-ESRGAN | GitHub/arXiv
+
+### V5.7.1 统一配置管理中心（2026-06-24）
+
+#### 痛点
+14+个配置点分散在代码/JSON/数据库/运行时中，作为IM平台服务商无统一管理入口。
+
+#### 配置层次（三级解析）
+```
+③ 运行时（GraphInput.custom_model_config）  ← 按请求注入，最高优先级
+② 数据库（tenant_configs表）              ← 租户级持久化，按tenant_id
+① 配置文件（config/*.json）                ← 系统默认值，根基保底
+```
+
+#### 配置管理中心架构
+
+**`src/utils/config_manager.py`** — 核心类
+| 方法 | 功能 | 返回 |
+|------|------|------|
+| `resolve(tenant_id, runtime_config)` | 三级解析 → 返回最终配置 | `Dict`（合并后的配置字典）|
+| `get_tenant_config(tenant_id)` | 读取租户配置 | `Optional[Dict]` |
+| `set_tenant_config(tenant_id, config)` | 写入/更新租户配置 | `bool` |
+| `delete_tenant_config(tenant_id)` | 删除租户配置（回归默认） | `bool` |
+| `get_all_nodes()` | 列出所有可配置节点 | `List[Dict]`（节点名+当前模型+文件路径）|
+| `get_config_summary()` | 系统配置总览 | `Dict`（各节点模型+OCR引擎+VL状态）|
+
+**配置API端点**（`/api/config/*`）
+| 端点 | 方法 | 说明 |
+|------|------|------|
+| `/api/config/nodes` | GET | 列出所有可配置节点及当前模型 |
+| `/api/config/summary` | GET | 系统配置总览 |
+| `/api/config/tenant/{tenant_id}` | GET | 读取租户配置 |
+| `/api/config/tenant/{tenant_id}` | POST/PUT | 写入/更新租户配置 |
+| `/api/config/tenant/{tenant_id}` | DELETE | 删除租户配置（回归默认）|
+
+**OCR API集成**
+```json
+// POST /ocr
+{
+  "image_url": "https://...",
+  "tenant_id": "corp_a",           // 可选：多租户场景
+  "custom_model": "gpt-4o",        // 可选：按请求覆盖模型
+  "ocr_engine": "smart"            // 可选：按请求覆盖OCR引擎
+}
+```
+
+#### 配置覆盖场景
+| 场景 | 配置方法 | 生效范围 |
+|------|---------|---------|
+| SaaS多租户 | `set_tenant_config("corp_a", {...})` → Admin API | 该租户所有请求 |
+| 单次测试 | `GraphInput.custom_model_config` | 本次请求 |
+| 全局默认 | 修改 `config/*.json` | 所有未配置租户 |
+| 发布到IM平台 | `/api/config/tenant/{tenant_id}` → 通过Admin面板配置 | 该企业群/用户 |
+
+#### 作为IM平台服务商的全流程
+```
+租户开通 → Admin创建tenant_id → 租户通过配置面板设置模型
+  → 配置存入tenant_configs表 → 用户发消息到IM机器人
+  → 事件回调携带tenant_id → ConfigManager.resolve(tenant_id)
+  → 三级解析合并 → SmartOCREngine/SmartVLEngine 按优先级使用
+  → 提取结果 → 推送到IM群/个人
+```
+
+#### 验证
+- ✅ ConfigManager初始化（自动扫描config/*.json 14个配置点）
+- ✅ 三级解析链：文件 > 数据库 > 运行时
+- ✅ 租户配置写入/读取/删除
+- ✅ test_run端到端验证（含`tenant_id`参数）
