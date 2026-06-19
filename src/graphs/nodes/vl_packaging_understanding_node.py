@@ -40,6 +40,21 @@ def vl_packaging_understanding_node(
     # 获取图片URL
     image_url = state.package_image.url
 
+    # V5.6 VLM-First模式：如果有OCR文本，作为辅助参考传递给模型
+    ocr_reference = state.ocr_reference_text
+    vlm_first = getattr(state, 'vlm_primary', True)
+    
+    # 渲染用户提示词
+    up_tpl = Template(up)
+    image_type = "商品包装"
+    if ocr_reference and ocr_reference.strip():
+        ocr_note = f"\n\n【辅助OCR参考文本（仅供辅助验证）】\n{ocr_reference[:2000]}\n\n注意：OCR文本仅供参考，请以图片实际观察为准。"
+        up_rendered = up_tpl.render({"image_type": image_type}) + ocr_note
+    else:
+        up_rendered = up_tpl.render({"image_type": image_type})
+
+    logger.info(f"VLM-First模式={'启用' if vlm_first else '禁用'}, OCR参考文本={'有' if ocr_reference else '无'}")
+
     # 使用LLMClient调用多模态模型
     client = LLMClient(ctx=ctx)
 
@@ -47,7 +62,7 @@ def vl_packaging_understanding_node(
     messages = [
         SystemMessage(content=sp),
         HumanMessage(content=[
-            {"type": "text", "text": up},
+            {"type": "text", "text": up_rendered},
             {"type": "image_url", "image_url": {"url": image_url}}
         ])
     ]
@@ -100,17 +115,28 @@ def vl_packaging_understanding_node(
         else:
             category_info = {}
 
-        # 计算VL置信度（基于顶层标准字段填充率）
+        # V5.6 VLM-First置信度计算增强：基于字段填充率+视觉可验证性
         standard_fields = ["product_type", "brand", "product_name", "specification",
                            "manufacturer", "production_date", "shelf_life"]
         filled = sum(1 for f in standard_fields if parsed.get(f))
-        vl_confidence = min(0.95, 0.5 + filled * 0.06)
+        
+        # VLM模式下置信度更高（直接视觉观察）
+        base_confidence = 0.55 if vlm_first else 0.50
+        vl_confidence = min(0.98, base_confidence + filled * 0.055)
+        
+        # 如果有OCR文本且与VL结果一致，提升置信度
+        if ocr_reference and vlm_first:
+            vl_confidence = min(0.99, vl_confidence + 0.03)
+
+        logger.info(f"VL理解完成: {filled}/{len(standard_fields)}字段, 置信度={vl_confidence:.3f}")
 
         return VLPackagingOutput(
             vl_extracted_data=parsed,
             vl_raw_response=result_text,
             vl_confidence=round(vl_confidence, 3),
-            vl_success=True
+            vl_success=True,
+            vlm_primary_mode=vlm_first,
+            ocr_text_used=bool(ocr_reference and ocr_reference.strip())
         )
 
     except Exception as e:

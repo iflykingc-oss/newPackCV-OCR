@@ -118,6 +118,21 @@ class GlobalState(BaseModel):
     platform_push_result: Optional[Dict[str, Any]] = Field(default_factory=dict, description="平台推送结果")
     success: bool = Field(default=True, description="是否成功")
     error_message: Optional[str] = Field(default=None, description="错误信息")
+    
+    # V5.6 图像质量增强
+    quality_enhanced_image: Optional[File] = Field(default=None, description="质量增强后的图片")
+    quality_enhance_steps: List[str] = Field(default_factory=list, description="质量增强步骤列表")
+    deblur_applied: bool = Field(default=False, description="是否应用了去模糊")
+    lowlight_corrected: bool = Field(default=False, description="是否应用了低光照校正")
+    perspective_corrected: bool = Field(default=False, description="是否应用了透视校正")
+    clahe_applied: bool = Field(default=False, description="是否应用了CLAHE对比度增强")
+    
+    # V5.6 弯曲文本校正
+    curved_text_corrected: bool = Field(default=False, description="是否进行了弯曲文本校正")
+    tps_confidence: float = Field(default=0.0, description="TPS校正置信度")
+    
+    # V5.6 VLM-First 标记
+    vlm_primary_mode: bool = Field(default=True, description="是否启用VLM-First模式（VL为主OCR为辅）")
 
 
 # ==================== V5.3 深度优化 - 节点I/O ====================
@@ -192,6 +207,56 @@ class CallAuditOutput(BaseModel):
     avg_duration_window: float = Field(default=0.0, description="窗口平均耗时（最近100次）")
 
 
+# ==================== V5.6 能力提升 - 节点I/O ====================
+
+# --- 图像质量增强节点（V5.6新增）---
+
+class ImageQualityEnhanceInput(BaseModel):
+    """图像质量增强节点输入"""
+    preprocessed_image: Optional[File] = Field(default=None, description="待增强的图片（来自预处理阶段）")
+    package_image: Optional[File] = Field(default=None, description="原始包装图片（回退选项）")
+    enable_deblur: bool = Field(default=True, description="是否启用去模糊（Wiener滤波）")
+    enable_lowlight: bool = Field(default=True, description="是否启用低光照增强（CLAHE+Gamma）")
+    enable_perspective: bool = Field(default=True, description="是否启用透视校正（4点变换）")
+    enable_clahe: bool = Field(default=True, description="是否启用CLAHE对比度增强")
+    enable_shadow_removal: bool = Field(default=True, description="是否启用阴影去除")
+    blur_detection_threshold: float = Field(default=40.0, description="模糊检测阈值（拉普拉斯方差，越低越模糊）")
+
+
+class ImageQualityEnhanceOutput(BaseModel):
+    """图像质量增强节点输出"""
+    enhanced_image: File = Field(..., description="增强后的图片URL")
+    deblur_applied: bool = Field(default=False, description="是否执行了去模糊")
+    lowlight_corrected: bool = Field(default=False, description="是否执行了低光照校正")
+    perspective_corrected: bool = Field(default=False, description="是否执行了透视校正")
+    clahe_applied: bool = Field(default=False, description="是否执行了CLAHE增强")
+    shadow_removed: bool = Field(default=False, description="是否执行了阴影去除")
+    enhancement_steps: List[str] = Field(default_factory=list, description="执行的增强步骤")
+    processing_time: float = Field(default=0.0, description="处理耗时（秒）")
+    quality_metrics: Dict[str, float] = Field(default_factory=dict, description="增强前后的质量指标（亮度/对比度/清晰度/噪声）")
+
+
+# --- 弯曲文本校正节点（V5.6新增）---
+
+class TextCurvatureCorrectInput(BaseModel):
+    """弯曲文本校正节点输入"""
+    enhanced_image: Optional[File] = Field(default=None, description="待校正的图片（来自质量增强节点）")
+    preprocessed_image: Optional[File] = Field(default=None, description="待校正的图片（来自预处理节点，备选）")
+    package_image: Optional[File] = Field(default=None, description="原始包装图片（最终备选）")
+    curvature_detection_threshold: float = Field(default=0.5, description="弯曲检测阈值（0-1）")
+    enable_tps_correction: bool = Field(default=True, description="是否启用TPS薄板样条校正")
+
+
+class TextCurvatureCorrectOutput(BaseModel):
+    """弯曲文本校正节点输出"""
+    corrected_image: File = Field(..., description="校正后的图片URL")
+    curvature_detected: bool = Field(default=False, description="是否检测到弯曲文本")
+    tps_applied: bool = Field(default=False, description="是否应用了TPS校正")
+    curvature_score: float = Field(default=0.0, description="弯曲程度评分（0-1）")
+    correction_confidence: float = Field(default=0.0, description="校正置信度（0-1）")
+    processing_time: float = Field(default=0.0, description="处理耗时（秒）")
+
+
 # ==================== 图出入参 ====================
 
 class GraphInput(BaseModel):
@@ -251,6 +316,7 @@ class OCRRecognizeInput(BaseModel):
     image: Optional[File] = Field(default=None, description="待识别图片（可能是原始图或预处理图）")
     package_image: Optional[File] = Field(default=None, description="原始包装图片")
     preprocessed_image: Optional[File] = Field(default=None, description="预处理后的图片")
+    corrected_image: Optional[File] = Field(default=None, description="弯曲校正后的图片（V5.6）")
     processing_info: Optional[Dict[str, Any]] = Field(default=None, description="预处理阶段的质量评估信息")
     ocr_engine_type: Literal["builtin", "api", "rapidocr", "paddleocr", "tesseract"] = Field(default="builtin", description="OCR引擎类型")
     ocr_api_config: Optional[Dict[str, Any]] = Field(default=None, description="OCR API配置")
@@ -399,6 +465,8 @@ class VLPackagingInput(BaseModel):
     """VL多模态包装理解节点输入"""
     package_image: File = Field(..., description="待理解的包装图片")
     model_name: str = Field(default="doubao-seed-2-0-pro-260215", description="多模态模型名称")
+    ocr_reference_text: Optional[str] = Field(default=None, description="V5.6 VLM-First: 辅助OCR参考文本（VL为主，OCR为辅）")
+    vlm_primary: bool = Field(default=True, description="V5.6 是否启用VLM-First模式（以视觉为主）")
 
 
 class VLPackagingOutput(BaseModel):
@@ -408,6 +476,9 @@ class VLPackagingOutput(BaseModel):
     vl_confidence: float = Field(default=0.0, description="理解结果的置信度")
     vl_success: bool = Field(default=False, description="VL模型调用是否成功")
     vl_error: Optional[str] = Field(default=None, description="VL模型调用错误信息")
+    # V5.6 VLM-First
+    vlm_primary_mode: bool = Field(default=True, description="是否使用了VLM-First模式")
+    ocr_text_used: bool = Field(default=False, description="是否使用了OCR文本作为辅助参考")
 
 
 # ==================== 知识图谱推理节点 ====================
@@ -895,6 +966,7 @@ class OCRRecognizeInputV2(BaseModel):
     image: Optional[File] = Field(default=None, description="待识别图片")
     preprocessed_image: Optional[File] = Field(default=None, description="预处理后的图片（兼容字段）")
     package_image: Optional[File] = Field(default=None, description="包装图片（兼容字段）")
+    corrected_image: Optional[File] = Field(default=None, description="弯曲校正后的图片（V5.6）")
     # 新增参数
     auto_language_detect: bool = Field(default=True, description="自动检测语言类型")
     supported_languages: List[str] = Field(default_factory=list, description="支持的语言列表，如['ch', 'en', 'japan']")
@@ -1005,6 +1077,7 @@ class StructureParseOutput(BaseModel):
 class QualityRouterInput(BaseModel):
     """图像质量路由节点输入"""
     package_image: File = Field(..., description="商品包装图片")
+    corrected_image: Optional[File] = Field(default=None, description="V5.6 弯曲校正后的图片（如有）")
     ocr_engine_type: str = Field(default="builtin", description="OCR引擎类型")
 
 

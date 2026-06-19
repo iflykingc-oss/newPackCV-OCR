@@ -1019,7 +1019,10 @@ def ocr_recognize_node(
 
     # 选择图片（优先预处理后的图片）
     image_url = ""
-    if state.preprocessed_image and state.preprocessed_image.url:
+    if state.corrected_image and state.corrected_image.url:
+        image_url = state.corrected_image.url
+        logger.info(f"使用弯曲校正后图片: {image_url[:60]}")
+    elif state.preprocessed_image and state.preprocessed_image.url:
         image_url = state.preprocessed_image.url
     elif state.package_image and state.package_image.url:
         image_url = state.package_image.url

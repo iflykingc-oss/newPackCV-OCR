@@ -14,6 +14,7 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from coze_coding_utils.runtime_ctx.context import Context
 from graphs.state import CategoryTemplateInput, CategoryTemplateOutput
+import re
 
 logger = logging.getLogger(__name__)
 
@@ -77,16 +78,18 @@ CATEGORY_TEMPLATES: Dict[str, Dict[str, Any]] = {
         "extraction_hints": {
             "ingredients": "化学成分/表面活性剂/功效成分",
             "usage": "使用方法、适用场景",
+            "warnings": "注意事项、警示语、禁忌内容",
         },
     },
     "个人护理": {
         "required_fields": ["brand", "product_name", "specification", "manufacturer",
                             "ingredients", "usage", "license_number"],
         "optional_fields": ["production_date", "shelf_life", "standard", "features",
-                            "storage_condition", "warning", "skin_type"],
+                            "storage_condition", "warning", "skin_type", "warnings"],
         "field_priority": {
             "ingredients": 10, "usage": 9, "skin_type": 8,
             "license_number": 8, "specification": 7,
+            "warnings": 6,
         },
         "validation_rules": {
             "license_number": r"国妆特字\w+|卫妆准字\w+",
@@ -234,7 +237,6 @@ def _apply_field_priority(data: Dict[str, Any], template: Dict[str, Any]) -> Dic
 
 def _validate_field(field: str, value: Any, template: Dict[str, Any]) -> Dict[str, Any]:
     """基于品类模板验证字段"""
-    import re
     result: Dict[str, Any] = {"value": value, "valid": True, "issues": []}
     if value is None or value == "" or value == "N/A":
         return result
@@ -254,6 +256,61 @@ def _normalize(v: Any) -> str:
     if isinstance(v, (dict, list)):
         return json.dumps(v, ensure_ascii=False)
     return str(v)
+
+
+def _infer_brand_from_rawtext(
+    ocr_data: Dict[str, Any],
+    raw_text: str
+) -> Dict[str, Any]:
+    """从raw_text中补全日化/个人护理品类的品牌和品名"""
+    result: Dict[str, Any] = {}
+    category = ocr_data.get("product_type", ocr_data.get("detected_category", ""))
+    if category not in ("日化", "个人护理", "日化清洁", "个人护理"):
+        return result
+
+    # 品牌常见位置特征：raw_text首行通常为品牌名
+    lines = [l.strip() for l in raw_text.split("\n") if l.strip()]
+    non_noise_lines = [l for l in lines if len(l) >= 2 and not re.match(r'^[\d\s\W]+$', l)]
+
+    # 如果brand缺失，尝试从raw_text首行非噪声行推断
+    if not ocr_data.get("brand"):
+        for line in non_noise_lines[:5]:
+            # 过滤掉已知的成分关键词行
+            if any(kw in line for kw in ["成分", "配料", "用途", "水、", "月桂", "椰油"]):
+                continue
+            if 2 <= len(line) <= 20 and not re.search(r'[：:、，。；]$', line):
+                result["brand"] = line
+                break
+
+        # 如果是常见化学成分开头（无品牌），标记为"未识别品牌"
+        first_line = non_noise_lines[0] if non_noise_lines else ""
+        if not result.get("brand"):
+            if re.match(r'^[水月桂椰油聚二]', first_line):
+                result["brand"] = None
+                result["brand_unrecognized"] = True
+
+    # product_name缺失时，从raw_text搜索品名或第二行
+    if not ocr_data.get("product_name"):
+        for i, line in enumerate(non_noise_lines):
+            if "品名" in line or "名称" in line or "产品" in line:
+                # 提取冒号后的内容
+                m = re.search(r'[：:]\s*(.+)', line)
+                if m:
+                    result["product_name"] = m.group(1).strip()
+                    break
+                elif i + 1 < len(non_noise_lines):
+                    result["product_name"] = non_noise_lines[i + 1]
+                    break
+
+    # specification缺失时，从raw_text搜索净含量
+    if not ocr_data.get("specification"):
+        for line in lines:
+            m = re.search(r'(\d+[\s]*[gkgmlL袋盒瓶包]|\d+[\s]*(克|千克|毫升|升|袋|盒|瓶|包))', line)
+            if m:
+                result["specification"] = m.group(1)
+                break
+
+    return result
 
 
 def category_template_node(
@@ -317,6 +374,29 @@ def category_template_node(
             "priority": "medium",
             "hint": hint or f"可选字段{f}"
         })
+
+    # 8. 品牌/品名推断（针对日化/个人护理品类）
+    inferred_brand = None
+    inferred_product_name = None
+    if detected_category in ("日化清洁", "个人护理") and raw_text:
+        infer_result = _infer_brand_from_rawtext(reordered, raw_text)
+        if infer_result:
+            inferred_brand = infer_result.get("brand")
+            inferred_product_name = infer_result.get("product_name")
+        if inferred_brand and (not reordered.get("brand") or str(reordered.get("brand")) in ("null", "None", "")):
+            reordered["brand"] = inferred_brand
+            completion_suggestions.insert(0, {
+                "field": "brand",
+                "priority": "high",
+                "hint": f"从包装文本推断品牌为：{inferred_brand}"
+            })
+        if inferred_product_name and (not reordered.get("product_name") or str(reordered.get("product_name")) in ("null", "None", "")):
+            reordered["product_name"] = inferred_product_name
+            completion_suggestions.insert(0, {
+                "field": "product_name",
+                "priority": "high",
+                "hint": f"从包装文本推断产品名为：{inferred_product_name}"
+            })
 
     logger.info(
         f"[品类模板] 品类={detected_category}，"

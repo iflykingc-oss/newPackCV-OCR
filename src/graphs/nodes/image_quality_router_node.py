@@ -100,8 +100,62 @@ def _estimate_image_quality(img: Image.Image) -> Dict[str, Any]:
 
 
 def _detect_possible_language(img: Image.Image) -> str:
-    """基于图像属性猜测主要语言（供路由参考）"""
-    return "zh"  # 默认中文，后续用实际检测模型
+    """使用Tesseract多语言OCR检测图像主要语言"""
+    try:
+        import pytesseract
+        import tempfile
+
+        # 保存图像到临时文件
+        tmp_path = os.path.join("/tmp", f"_lang_detect_{os.getpid()}.png")
+        img.save(tmp_path)
+        
+        # 对每种语言尝试OCR，选返回文本最长且非空的
+        candidates = [
+            ("chi_sim", "zh"),
+            ("jpn", "ja"),
+            ("kor", "ko"),
+            ("eng", "en"),
+        ]
+        results = {}
+        for lang_code, lang_name in candidates:
+            try:
+                text = pytesseract.image_to_string(tmp_path, lang=lang_code).strip()
+                # 只保留有意义的文本（至少3个非空白字符）
+                meaningful = len([c for c in text if c.isalpha() or '\u4e00' <= c <= '\u9fff' or '\u3040' <= c <= '\u30ff' or '\uac00' <= c <= '\ud7af'])
+                if meaningful >= 3:
+                    results[lang_name] = meaningful
+            except Exception:
+                continue
+        
+        # 清理临时文件
+        try:
+            os.remove(tmp_path)
+        except Exception:
+            pass
+        
+        if results:
+            # 返回匹配文本最长的语言
+            detected = max(results, key=results.get)
+            return detected
+        
+        # 无任何识别结果，尝试综合检测
+        try:
+            full_text = pytesseract.image_to_string(tmp_path, lang="chi_sim+eng").strip()
+            if full_text and len(full_text) > 5:
+                # 判断包含什么字符
+                cjk_count = sum(1 for c in full_text if '\u4e00' <= c <= '\u9fff')
+                if cjk_count >= 3:
+                    return "zh"
+                return "en"
+        except Exception:
+            pass
+    except ImportError:
+        pass
+    except Exception:
+        pass
+    
+    # 兜底：基于图像文件名或URL猜测
+    return "zh"  # 中国市场默认为中文
 
 
 def image_quality_router_node(
@@ -115,7 +169,8 @@ def image_quality_router_node(
     """
     ctx = runtime.context
 
-    img = state.package_image
+    # V5.6 优先使用校正后的图片
+    img = state.corrected_image or state.package_image
 
     # 加载图片
     pil_img = _fetch_image(img.url) if img.url.startswith("http") else None

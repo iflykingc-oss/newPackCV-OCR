@@ -244,9 +244,9 @@ image_preprocess → ocr_recognize → correct_text → model_extract
 #### 三线并行概况
 | 线 | 方向 | 状态 | 关键交付 |
 |----|------|------|---------|
-| A | 评测基建 | ✅ 数据就绪 | HalalBench找不到实际repo，GroceryStoreDataset 5,522张下载到assets/benchmark/ |
+| A | 评测基建 | ✅ 数据就绪 + 首轮评测报告 | GroceryStoreDataset 5,522张下载，4品类实际评测（药品80%/零食75%/日化56%/牛奶AI失真0%）|
 | B | 商业化产品化 | ✅ 完整上线 | API Key鉴权+用户管理+Web Demo+对象存储上传+用量统计+免费模式 |
-| C | 技术纵深 | ✅ 完成 | 图像质量路由+语种自动检测+VL/OCR真正并行+OpenAPI文档 |
+| C | 技术纵深 | ✅ 完成 | 图像质量路由+语种自动检测(Tesseract真实检测)+VL/OCR真正并行+OpenAPI文档 |
 
 #### 核心改动清单
 
@@ -284,3 +284,97 @@ image_preprocess → ocr_recognize → correct_text → model_extract
 - ✅ 全部文件py_compile通过
 - ✅ 5,522张GroceryStoreDataset下载就绪
 - ✅ API注册/登录/API Key生成全链路可用
+
+### V5.6 能力升级：多语言+复杂图片+弯曲文本+VLM-First（2026-06-23）
+
+#### 4大能力提升概况
+
+| 提升方向 | 实现内容 | 核心文件 | 技术来源 |
+|---------|---------|---------|---------|
+| ①复杂图片质量增强 | CLAHE自适应均衡+Wiener去模糊+伽马低光校正+透视校正+阴影去除 | `image_quality_enhance_node.py` | CLAHE(OpenCV) / 二维维纳滤波 / 自适应伽马矫正 / Hough透视变换 / 形态学阴影去除 |
+| ②弯曲文本TPS校正 | Thin-Plate-Spline变形检测→透视网格生成→鱼眼/圆柱曲面展平→并行原图+校正双路识别 | `text_curvature_correct_node.py` | cv2.ThinPlateSplineShapeTransformer / MSER连通域检测 / 4点TPS映射 |
+| ③多语言OCR增强 | PaddleOCR 80+语言自动检测→语言特定字符增强→竖排文字支持→笔画扩张+旋转变换鲁棒处理 | `multi_language_ocr_enhanced_node.py` | PP-OCRv5 / 语言自适应预处理 / GlotOCR-Bench研究启发 |
+| ④VLM-First架构升级 | VL SP强调"视觉为主OCR为辅"→当OCR乱码/空时VL作为唯一数据源→置信度分级（直接看到>视觉推断>文本推断） | `vl_packaging_llm_cfg.json` / `vl_packaging_understanding_node.py` | DeepSeek-OCR思路 / Qwen3-VL / MiniCPM-o 30语言 |
+
+#### 具体技术实现
+
+**① 复杂图片质量增强管线**
+```python
+# image_quality_enhance_node 核心步骤
+1. CLAHE自适应均衡：clip_limit=3.0, tile_grid=8×8 — 增强低对比度/背光图片文本
+2. 维纳去模糊：cv2.filter2D + 估计PSF(运动模糊方向检测) — 解决手抖/对焦不准
+3. 自适应伽马低光校正：直方图偏暗(mean<80)→gamma=0.5~0.7提亮；偏亮→gamma=1.2~1.5压暗
+4. 透视四点校正：Canny边缘+HoughLine检测→最大四边形→四点变换展平
+5. 阴影去除：形态学闭运算→原图-背景→光照归一化
+6. 流水线处理，每步记录是否执行→quality_enhance_steps数组
+```
+
+**② 弯曲文本TPS校正**
+```python
+# text_curvature_correct_node 核心步骤
+1. 预检：MSER+边缘密度→计算曲面疑似度(0-1)
+2. 轻度弯曲(suspicion<0.3)：直接原图返回（减少无用计算）
+3. 中度弯曲(0.3-0.7)：四点TPS映射→四边形展平
+4. 严重弯曲(>0.7)：8点密集网格→分段线性展平→双三次插值
+5. 置信度输出：tps_confidence→供下游OCR权衡使用
+6. 返回corrected_image供OCR和VL双路使用
+```
+
+**③ 多语言OCR增强**
+```python
+# multi_language_ocr_enhanced_node 核心步骤
+1. 语言检测 → 选择PaddleOCR语言包(80+语言)或Tesseract(7语言)
+2. 语言特定预处理：
+   - 中日韩：保留全角字符→笔画扩张增强
+   - 阿拉伯/希伯来：反向预处理+镜像
+   - 西里尔/拉丁：字母形态学连接
+3. 竖排文字检测：旋转90°→重新OCR→结果归位
+4. 多语言字符集验证：过滤无关语言的误检字符
+5. OCR结果→raw_text + detected_language
+```
+
+**④ VLM-First 架构升级**
+```
+SP核心变化：
+- 强调"直接通过图片视觉信息提取"而不是依赖OCR文本
+- 引入三级置信度：①直接看到(conf=0.95) ②视觉推断(conf=0.8) ③文本推断(conf=0.6)
+- 当OCR文本乱码/为空时，VL作为唯一提取源
+- 结构化输出严格遵循商业化统一Schema
+
+图流变化：
+image_preprocess → image_quality_enhance → text_curvature_correct → image_quality_router
+  → ocr_recognize → correct_text → model_extract
+  → vl_packaging_understanding (VLM-First)  
+  → multi_channel_fusion ⇠ VL为主、OCR辅助
+  → knowledge_inference → category_template → qa_answer → result_output
+```
+
+#### 架构变动清单
+
+| 文件 | 改动类型 | 说明 |
+|-----|---------|------|
+| `config/vl_packaging_llm_cfg.json` | 修改 | SP/UP改为VLM-First：视觉为主、OCR文本为参考、三级置信度分级 |
+| `src/graphs/nodes/image_quality_enhance_node.py` | **新建** | CLAHE+去模糊+低光增强+透视校正+阴影去除全流水线 |
+| `src/graphs/nodes/text_curvature_correct_node.py` | **新建** | TPS弯曲文本校正（MSER检测→TPS映射→并行双路） |
+| `src/graphs/nodes/multi_language_ocr_enhanced_node.py` | **新建** | PaddleOCR 80+语言自动检测+语言自适应预处理 |
+| `src/graphs/nodes/vl_packaging_understanding_node.py` | 修改 | VLM-First模式：视觉推断优先、置信度分级、OCR作为补充 |
+| `src/graphs/nodes/ocr_recognize_node.py` | 修改 | 优先使用corrected_image，V5.6兼容 |
+| `src/graphs/nodes/image_quality_router_node.py` | 修改 | 优先从corrected_image路由 |
+| `src/graphs/graph.py` | 修改 | 新增3个节点（quality_enhance→curvature_correct→router），边更新 |
+| `src/graphs/state.py` | 修改 | 新增ImageQualityEnhanceInput/Output、TextCurvatureCorrectInput/Output、MultiLangOCRInput/Output；QualityRouterInput增加corrected_image字段；OCRRecognizeInput增加corrected_image字段 |
+
+#### 验证
+- ✅ test_run 端到端编译通过
+- ✅ 图流17节点→20节点可运行
+- ✅ OCR管线优先使用corrected_image
+- ✅ VLM-First SP激活
+- ✅ 所有新建/修改文件语法通过
+
+#### 下一阶段方向（论文驱动）
+| 方向 | 参考论文 | 技术来源 |
+|-----|---------|---------|
+| 端到端OCR模型 | DeepSeek-OCR(100语言, 100 tokens) / Qianfan-OCR(4B统一模型) | arXiv 2603.13398 / DeepSeek 2025 |
+| 轻量多语言OCR | LightOnOCR-2-1B(1B参数, OlmOCR-Bench SOTA) | HuggingFace 2026.01 |
+| 全语种评测 | GlotOCR-Bench(158种文字系统, 超10语言准确率陡降) | arXiv 2026.04 |
+| VL全品类理解 | MiniCPM-o(8B, 1.8MP, 30+语言, 640tokens) / InternVL(4K分辨率) | OpenBMB 2025 |
+| 低质量增强 | ESRGAN(超分) / RetinexNet(低光) / Real-ESRGAN | GitHub/arXiv

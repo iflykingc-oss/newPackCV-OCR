@@ -39,6 +39,10 @@ from graphs.nodes.call_audit_node import call_audit_node
 from graphs.nodes.multi_language_ocr_node import multi_language_ocr_node
 # V5.5 图像质量路由
 from graphs.nodes.image_quality_router_node import image_quality_router_node
+# V5.6 能力提升：图像质量增强 / 弯曲文本TPS校正 / 多语言OCR增强
+from graphs.nodes.image_quality_enhance_node import image_quality_enhance_node
+from graphs.nodes.text_curvature_correct_node import text_curvature_correct_node
+from graphs.nodes.multi_language_ocr_enhanced_node import multi_language_ocr_enhanced_node
 
 
 def route_processing_mode(state: GlobalState) -> str:
@@ -110,6 +114,11 @@ builder.add_node("call_audit", call_audit_node)
 # ===== V5.5 图像质量路由 =====
 builder.add_node("image_quality_router", image_quality_router_node)
 
+# ===== V5.6 能力提升：图像质量增强 / 弯曲文本校正 / 多语言OCR增强 =====
+builder.add_node("image_quality_enhance", image_quality_enhance_node)
+builder.add_node("text_curvature_correct", text_curvature_correct_node)
+builder.add_node("multi_language_ocr_enhanced", multi_language_ocr_enhanced_node)
+
 # 设置入口点（路由节点）
 builder.set_entry_point("route_processing")
 
@@ -126,10 +135,12 @@ builder.add_conditional_edges(
 # 批量处理 -> 结束
 builder.add_edge("batch_process", END)
 
-# 单图处理流程：增加图像质量路由节点预处理后分发
+# 单图处理流程：预处理 → 质量增强 → 弯曲校正 → 质量路由分发
 
-# 新增图像质量路由节点
-builder.add_edge("image_preprocess", "image_quality_router")
+# V5.6 新增质量增强和弯曲校正前置管线
+builder.add_edge("image_preprocess", "image_quality_enhance")
+builder.add_edge("image_quality_enhance", "text_curvature_correct")
+builder.add_edge("text_curvature_correct", "image_quality_router")
 
 # 1) 主OCR通道：图片预处理 -> 图像质量路由 -> OCR识别 -> 智能纠错 -> 结构化提取
 builder.add_edge("image_quality_router", "ocr_recognize")
