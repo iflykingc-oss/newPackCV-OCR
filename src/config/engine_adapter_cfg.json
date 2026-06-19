@@ -1,0 +1,40 @@
+{
+    "ocr_engines": {
+        "lighton_ocr": {
+            "mode": "disabled",
+            "endpoint": "",
+            "api_key": "",
+            "hf_token": "",
+            "model_id": "lightonai/LightOnOCR-2-1B",
+            "max_tokens": 4096,
+            "temperature": 0.2
+        },
+        "deepseek_ocr": {
+            "mode": "disabled",
+            "endpoint": "",
+            "api_key": "",
+            "hf_token": "",
+            "model_id": "deepseek-ai/DeepSeek-OCR-2",
+            "max_tokens": 2048,
+            "num_visual_tokens": 256
+        },
+        "fallback": {
+            "engine_type": "builtin"
+        }
+    },
+    "vl_engines": {
+        "minicpm_o": {
+            "mode": "disabled",
+            "endpoint": "",
+            "api_key": "",
+            "hf_token": "",
+            "model_id": "openbmb/MiniCPM-o-4_5",
+            "max_tokens": 4096,
+            "temperature": 0.1
+        },
+        "fallback": {
+            "llm_config": "config/vl_packaging_llm_cfg.json"
+        }
+    },
+    "min_confidence": 0.3
+}

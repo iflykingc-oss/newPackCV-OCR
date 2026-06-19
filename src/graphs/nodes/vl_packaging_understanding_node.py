@@ -43,8 +43,43 @@ def vl_packaging_understanding_node(
     # V5.6 VLM-First模式：如果有OCR文本，作为辅助参考传递给模型
     ocr_reference = state.ocr_reference_text
     vlm_first = getattr(state, 'vlm_primary', True)
-    
-    # 渲染用户提示词
+
+    # ====== SmartVL Engine (MiniCPM-o) ======
+    smart_vl_used = False
+    try:
+        engine_cfg_path = os.path.join(
+            os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects"),
+            "src/config/engine_adapter_cfg.json"
+        )
+        if os.path.exists(engine_cfg_path) and vlm_first:
+            with open(engine_cfg_path) as f:
+                engine_cfg = json.load(f)
+            minicpm_cfg = engine_cfg.get("vl_engines", {}).get("minicpm_o", {})
+            if minicpm_cfg.get("mode") in ("vllm", "hf_api"):
+                from utils.vl_engines.minicpm_vl import MiniCPMVLEngine
+                mvl = MiniCPMVLEngine(minicpm_cfg)
+                if mvl.is_available():
+                    logger.info("MiniCPM-o可用，尝试VL理解...")
+                    vl_result = mvl.understand(
+                        image_url=image_url,
+                        prompt="",
+                        ocr_hint=ocr_reference or ""
+                    )
+                    if vl_result.success and len(vl_result.structured_data) > 3:
+                        logger.info(f"MiniCPM-o成功: fields={len(vl_result.detected_fields)}")
+                        return VLPackagingOutput(
+                            vl_success=True,
+                            vl_extracted_data=vl_result.structured_data,
+                            vl_raw_response=vl_result.raw_response,
+                            vl_confidence=vl_result.confidence,
+                            engine_used=vl_result.engine_name
+                        )
+                    else:
+                        logger.info(f"MiniCPM-o未达要求, fallback=本地VL")
+    except Exception as e:
+        logger.warning(f"SmartVL初始化失败: {e}, 降级到本地VL")
+
+    # 读取模型配置
     up_tpl = Template(up)
     image_type = "商品包装"
     if ocr_reference and ocr_reference.strip():

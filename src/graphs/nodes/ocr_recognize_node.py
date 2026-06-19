@@ -1038,6 +1038,39 @@ def ocr_recognize_node(
             processing_time=time.time() - start_time
         )
 
+    # ====== Smart OCR Engine (LightOnOCR/DeepSeek-OCR) ======
+    if state.ocr_engine_type == "smart" or state.ocr_engine_type == "auto":
+        try:
+            from utils.ocr_engines.smart_router import SmartOCREngine
+            engine_cfg_path = os.path.join(
+                os.getenv("COZE_WORKSPACE_PATH", "/workspace/projects"),
+                "src/config/engine_adapter_cfg.json"
+            )
+            if os.path.exists(engine_cfg_path):
+                with open(engine_cfg_path) as f:
+                    engine_cfg = json.load(f)
+                smart_engine = SmartOCREngine(engine_cfg)
+                if any(smart_engine.get_engine_status().get(e, {}).get("available", False)
+                       for e in ["lighton_ocr", "deepseek_ocr"]):
+                    logger.info("SmartOCR引擎可用，尝试高级OCR...")
+                    result = smart_engine.recognize(image_url)
+                    if result.success and result.confidence >= 0.3 and len(result.raw_text.strip()) > 20:
+                        elapsed = time.time() - start_time
+                        logger.info(f"SmartOCR成功: engine={result.engine_name}, "
+                                    f"conf={result.confidence:.2f}, len={len(result.raw_text)}")
+                        return OCRRecognizeOutput(
+                            raw_text=result.raw_text,
+                            ocr_confidence=result.confidence,
+                            engine_used=result.engine_name,
+                            corrected_result=result.raw_text,
+                            processing_time=elapsed,
+                            ocr_regions=result.regions
+                        )
+                    else:
+                        logger.info(f"SmartOCR未达要求, 降级到本地OCR")
+        except Exception as e:
+            logger.warning(f"SmartOCR初始化失败: {e}, 降级到本地OCR")
+
     # 下载图片
     img = download_image(image_url)
     if img is None:

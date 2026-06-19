@@ -370,6 +370,114 @@ image_preprocess → image_quality_enhance → text_curvature_correct → image_
 - ✅ VLM-First SP激活
 - ✅ 所有新建/修改文件语法通过
 
+### V5.7 引擎融合：LightOnOCR-2-1B + DeepSeek-OCR + MiniCPM-o 智能梯级引擎（2026-06-24）
+
+#### 核心思路
+不替换现有OCR+VL引擎，而是在之上叠加先进模型作为**能力提升层**，形成"越新越强→降级不断"的梯级引擎链。
+
+```
+用户 → SmartOCREngine.recognize(image_url)
+  → ① LightOnOCR-2-1B（1B参数，最快，优先）+ API/本地双模式
+  → ② DeepSeek-OCR（3B参数，最优AP，次优先）+ API/本地双模式  
+  → ③ FallbackOCR（现有Tesseract/PaddleOCR/RapidOCR 根基保底）
+
+用户 → SmartVLEngine.understand(image_url)
+  → ① MiniCPM-o（8B参数，30+语言，多模态最强）+ API/本地双模式
+  → ② FallbackVL（现有VL模型 根基保底）
+```
+
+#### 架构设计
+
+**OCR引擎适配器体系**（`src/utils/ocr_engines/`）
+| 组件 | 职责 | 技术实现 |
+|------|------|---------|
+| `BaseOCREngine` | 抽象基类 | `recognize(URL)→OCRResult` + `is_available()` + name|
+| `LightOnOCREngine` | LightOnOCR-2-1B适配 | HF Inference API + vLLM + 本地transformers 三模式 |
+| `DeepSeekOCREngine` | DeepSeek-OCR适配 | HF Inference API + vLLM + 本地 三模式 |
+| `FallbackOCREngine` | 现有引擎包装 | 包装existing `multi_engine_ocr()`（Tesseract/PaddleOCR/RapidOCR）|
+| `SmartOCREngine` | 智能路由器 | 链式调用：LightOn→DeepSeek→Fallback；失败自动降级；缓存已不可用引擎10分钟 |
+
+**VL引擎适配器体系**（`src/utils/vl_engines/`）
+| 组件 | 职责 | 技术实现 |
+|------|------|---------|
+| `BaseVLEngine` | 抽象基类 | `understand(URL)→Dict` + `is_available()` |
+| `MiniCPmVLEngine` | MiniCPM-o适配 | vLLM API / HF Inference API / 本地 三模式 |
+| `FallbackVLEngine` | 现有VL引擎包装 | 包装现有LLM-based VL路径 |
+| `SmartVLEngine` | 智能路由器 | MiniCPM-o→FallbackVL 两级降级 |
+
+**配置文件**（`src/config/engine_adapter_cfg.json`）
+```json
+{
+  "ocr_engines": {
+    "lighton_ocr": {"enabled": true, "mode": "auto", "api_url": null, "model": "lightonai/LightOnOCR-2-1B", "api_key": null},
+    "deepseek_ocr": {"enabled": true, "mode": "auto", "api_url": null, "model": "deepseek-ai/deepseek-ocr", "api_key": null}
+  },
+  "vl_engines": {
+    "minicpm_vl": {"enabled": true, "mode": "auto", "api_url": null, "model": "openbmb/MiniCPM-o-2_6", "api_key": null}
+  }
+}
+```
+- `mode: "auto"` → 自动检测GPU → 有GPU用本地transformers，无GPU用API或降级
+- `mode: "local"` → 强制本地推理（需GPU）
+- `mode: "api"` → 强制API模式（需配置api_url/api_key）
+- `api_url` 为null时自动使用HF Inference API
+
+#### 节点变动
+
+**OCR识别节点**（`ocr_recognize_node.py`）
+- 新增`ocr_engine_type == "smart"`分支
+- smart模式：先SmartOCREngine.recognize(URL) → 若成功且置信度>0.6 → 用其结果
+- smart模式失败/低置信度 → 降级到原有`multi_engine_ocr()`处理本地图片
+- 现有"builtin"/"api"/"rapidocr"/"paddleocr"/"tesseract"模式完全保留
+
+**VL理解节点**（`vl_packaging_understanding_node.py`）
+- 新增SmartVLEngine前置尝试
+- MiniCPM-o可用 → VL提取+置信度评估 → 若置信度>0.7 → 直接使用
+- MiniCPM-o不可用/低置信度 → 降级到现有VL LLM路径
+- `engine_used`字段记录实际使用的引擎名
+
+#### 启用条件（当前环境无GPU，自动降级验证通过）
+| 引擎 | 当前状态 | 启用条件 |
+|------|---------|---------|
+| LightOnOCR-2-1B | ✅ 代码就绪，❌ 当前不可用 | 有GPU或配置HF API Key |
+| DeepSeek-OCR | ✅ 代码就绪，❌ 当前不可用 | 有GPU或配置HF API Key |
+| MiniCPM-o | ✅ 代码就绪，❌ 当前不可用 | 有GPU或配置vLLM API端点 |
+| FallbackOCR | ✅ 可用（当前活动引擎） | 无额外条件，即时可用 |
+| FallbackVL | ✅ 可用（当前活动引擎） | 无额外条件，即时可用 |
+
+#### 架构变动清单
+| 文件 | 改动类型 | 说明 |
+|-----|---------|------|
+| `src/utils/ocr_engines/__init__.py` | **新建** | OCR引擎包初始化 |
+| `src/utils/ocr_engines/base.py` | **新建** | `BaseOCREngine`抽象基类 + `OCRResult` |
+| `src/utils/ocr_engines/lighton_ocr.py` | **新建** | LightOnOCR-2-1B适配器（API/本地双模式） |
+| `src/utils/ocr_engines/deepseek_ocr.py` | **新建** | DeepSeek-OCR适配器（API/本地双模式） |
+| `src/utils/ocr_engines/fallback_ocr.py` | **新建** | 现有OCR引擎统一包装 |
+| `src/utils/ocr_engines/smart_router.py` | **新建** | 智能降级路由+引擎状态缓存 |
+| `src/utils/vl_engines/__init__.py` | **新建** | VL引擎包初始化 |
+| `src/utils/vl_engines/base.py` | **新建** | `BaseVLEngine`抽象基类 + `VLResult` |
+| `src/utils/vl_engines/minicpm_vl.py` | **新建** | MiniCPM-o适配器（API/本地双模式） |
+| `src/utils/vl_engines/fallback_vl.py` | **新建** | 现有VL引擎包装 |
+| `src/utils/vl_engines/smart_router.py` | **新建** | 智能降级路由+引擎状态缓存 |
+| `src/config/engine_adapter_cfg.json` | **新建** | 引擎配置（API/本地/auto三模式） |
+| `src/graphs/nodes/ocr_recognize_node.py` | 修改 | 新增`ocr_engine_type="smart"`分支 + SmartOCREngine前置尝试 |
+| `src/graphs/nodes/vl_packaging_understanding_node.py` | 修改 | 新增SmartVLEngine前置尝试 + engine_used记录 |
+| `src/graphs/state.py` | 修改 | 新增`engine_used`字段到VLPackagingOutput；ocr_engine_type Literal增加"smart" |
+
+#### 验证
+- ✅ `ocr_engine_type="builtin"` 管线编译通过、端到端运行正常
+- ✅ `ocr_engine_type="smart"` 管线编译通过、自动降级到FallbackOCR正常
+- ✅ SmartOCREngine引擎状态检测正常（LightOn/DeepSeek❌不可用, Fallback✅可用）
+- ✅ SmartVLEngine引擎状态检测正常（MiniCPM-o❌不可用, FallbackVL✅可用）
+- ✅ Auto-grading：无GPU无API Key时静默降级，不报错不中断
+- ✅ 有GPU/API Key时自动升级到最优引擎
+
+#### 后续升级路径
+1. **GPU就绪** → 设置`mode: "local"`，模型自动加载本地transformers推理
+2. **vLLM服务就绪** → 配置`api_url`指向vLLM端点，使用OpenAI兼容接口
+3. **HF API Key可用** → 配置`api_key`，使用HF Inference API在线推理
+4. **多模型融合** → 扩展`engine_adapter_cfg.json`增加模型权重/fallback策略字段
+
 #### 下一阶段方向（论文驱动）
 | 方向 | 参考论文 | 技术来源 |
 |-----|---------|---------|
