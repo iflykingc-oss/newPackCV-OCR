@@ -64,6 +64,15 @@ class GlobalState(BaseModel):
     alerts: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="告警列表")
     reports: Optional[Dict[str, Any]] = Field(default_factory=dict, description="生成的报表")
     
+    # 深度优化方向⑥-⑦：VL多模态 + 知识图谱推理
+    vl_extracted_data: Optional[Dict[str, Any]] = Field(default_factory=dict, description="VL多模态理解的结构化数据")
+    vl_raw_response: Optional[str] = Field(default="", description="VL多模态原始响应")
+    vl_confidence: Optional[float] = Field(default=0.0, description="VL理解置信度")
+    vl_success: Optional[bool] = Field(default=False, description="VL调用是否成功")
+    inferred_fields: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="知识推理补充字段")
+    validation_results: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="知识推理验证结果")
+    inferred_product_type: Optional[str] = Field(default="", description="知识推理推断的产品类型")
+    
     # 输出数据
     final_result: Dict[str, Any] = Field(default_factory=dict, description="最终输出结果")
     export_file_url: Optional[str] = Field(default="", description="导出文件URL（TXT/PDF/Excel）")
@@ -259,6 +268,41 @@ class FeishuNotifyInput(BaseModel):
 class FeishuNotifyOutput(BaseModel):
     """飞书通知节点输出"""
     platform_push_result: Dict[str, Any] = Field(default_factory=dict, description="飞书推送结果")
+
+
+# ==================== VL多模态包装理解节点 ====================
+
+class VLPackagingInput(BaseModel):
+    """VL多模态包装理解节点输入"""
+    package_image: File = Field(..., description="待理解的包装图片")
+    model_name: str = Field(default="doubao-seed-2-0-pro-260215", description="多模态模型名称")
+
+
+class VLPackagingOutput(BaseModel):
+    """VL多模态包装理解节点输出"""
+    vl_extracted_data: Dict[str, Any] = Field(default_factory=dict, description="多模态模型直接理解的结构化数据")
+    vl_raw_response: str = Field(default="", description="多模态模型识别的原始响应文本")
+    vl_confidence: float = Field(default=0.0, description="理解结果的置信度")
+    vl_success: bool = Field(default=False, description="VL模型调用是否成功")
+    vl_error: Optional[str] = Field(default=None, description="VL模型调用错误信息")
+
+
+# ==================== 知识图谱推理节点 ====================
+
+class KnowledgeInferenceInput(BaseModel):
+    """知识图谱推理节点输入"""
+    structured_data: Dict[str, Any] = Field(default_factory=dict, description="已有的结构化提取数据")
+    raw_text: str = Field(default="", description="OCR原始文本")
+    product_type: str = Field(default="", description="产品类型")
+    vl_data: Optional[Dict[str, Any]] = Field(default=None, description="VL多模态理解的数据（双通道融合用）")
+
+
+class KnowledgeInferenceOutput(BaseModel):
+    """知识图谱推理节点输出"""
+    inferred_fields: List[Dict[str, Any]] = Field(default_factory=list, description="推理补充的字段列表")
+    validation_results: List[Dict[str, Any]] = Field(default_factory=list, description="字段验证结果列表")
+    inferred_product_type: str = Field(default="", description="推理推断的产品类型")
+    inference_raw_response: str = Field(default="", description="大模型原始响应文本")
 
 
 # ==================== 路由处理节点 ====================

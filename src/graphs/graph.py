@@ -28,6 +28,8 @@ from graphs.nodes.qa_answer_node import qa_answer_node
 from graphs.nodes.result_output_node import result_output_node
 from graphs.nodes.batch_process_node import batch_process_node
 from graphs.nodes.feishu_notify_node import feishu_notify_node
+from graphs.nodes.vl_packaging_understanding_node import vl_packaging_understanding_node
+from graphs.nodes.knowledge_inference_node import knowledge_inference_node
 
 
 def route_processing_mode(state: GlobalState) -> str:
@@ -90,6 +92,12 @@ builder.add_node("qa_answer", qa_answer_node,
 builder.add_node("result_output", result_output_node)
 builder.add_node("feishu_notify", feishu_notify_node)
 
+# ===== 深度优化方向④-⑦：新增高级节点 =====
+builder.add_node("vl_packaging_understanding", vl_packaging_understanding_node,
+                 metadata={"type": "agent", "llm_cfg": "config/vl_packaging_llm_cfg.json"})
+builder.add_node("knowledge_inference", knowledge_inference_node,
+                 metadata={"type": "agent", "llm_cfg": "config/knowledge_inference_llm_cfg.json"})
+
 # 设置入口点（路由节点）
 builder.set_entry_point("route_processing")
 
@@ -106,11 +114,23 @@ builder.add_conditional_edges(
 # 批量处理 -> 结束（批量处理节点自己完成所有工作）
 builder.add_edge("batch_process", END)
 
-# 单图处理流程：图片预处理 -> OCR识别 -> 智能纠错 -> 结构化提取 -> 语义问答 -> 结果输出
+# ===== 单图处理流程 =====
+# 方向④-⑤增强预处理 + 方向⑥VL并行通道
+# 主OCR通道：图片预处理 -> OCR识别 -> 智能纠错 -> 结构化提取
 builder.add_edge("image_preprocess", "ocr_recognize")
 builder.add_edge("ocr_recognize", "correct_text")
 builder.add_edge("correct_text", "model_extract")
-builder.add_edge("model_extract", "qa_answer")
+
+# 方向⑦：知识推理 - 在结构化提取后增强字段
+builder.add_edge("model_extract", "knowledge_inference")
+
+# 方向⑥：VL多模态通道 - 与OCR通道并行，在qa_answer前融合
+# image_preprocess → vl_packaging_understanding（并行于ocr_recognize）
+# 目前先让VL作为独立通道：
+builder.add_edge("knowledge_inference", "vl_packaging_understanding")
+
+# 合并到QA和输出
+builder.add_edge("vl_packaging_understanding", "qa_answer")
 builder.add_edge("qa_answer", "result_output")
 
 # 结果输出 -> 飞书通知

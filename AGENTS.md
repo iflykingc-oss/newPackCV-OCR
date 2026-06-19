@@ -5,12 +5,36 @@
 - **功能**: 面向货架/包装场景的高精度OCR识别解决方案 (全品类通用)
 - **核心升级**: RapidOCR(ONNX)主引擎 + 自适应5策略预处理 + 多尺度检测 + 布局感知KV提取 + LLM后验证 + 全品类自由格式提取 + 专线营养表提取 + 投影法布局分析 + 小字超分增强 + 飞书机器人 + HTTP API服务 + **多引擎融合(PaddleOCR)** + **透视校正** + **置信度评分**
 
-### V5.1 深度优化（2026-06-19）
+### V5.2 深度优化（2026-06-19）
+以下为此前确认的四方向进一步推进：
+
 | 优化方向 | 实现内容 | 变更文件 | 状态 |
 |---------|---------|---------|------|
-| ①多引擎OCR融合 | PaddleOCR+RapidOCR+Tesseract 置信度加权融合 | `ocr_recognize_node.py` | ✅ 已实现 |
-| ②预处理升级 | 自适应透视校正+倾斜检测修复+超分辨率增强 | `image_preprocess_node.py` | ✅ 已实现 |
-| ③字段推理增强 | 置信度评分+关联字段推断+营养表多级解析 | `model_extract_node.py` | ✅ 已实现 |
+| ④弯曲文本/透视校正 | 自适应透视校正+倾斜检测修复 | `image_preprocess_node.py` | ✅ |
+| ⑤场景超分辨率 | 形态学梯度小字检测→2x-3x上采样增强 | `super_resolution_enhance_node.py` | ✅ |
+| ⑥VL多模态包装理解 | 多模态大模型(doubao-seed-2-0-pro)端到端包装理解，跳过OCR管线 | `vl_packaging_understanding_node.py` + `config/vl_packaging_llm_cfg.json` | ✅ |
+| ⑦知识图谱RAG推理 | 知识库链式推理补全缺数字段+合理性验证 | `knowledge_inference_node.py` + `config/knowledge_inference_llm_cfg.json` | ✅ |
+
+### 深度优化节点清单 (V5.2 新增)
+
+| 节点名 | 文件位置 | 类型 | 功能描述 | 分支逻辑 | 配置文件 |
+|-------|---------|------|---------|---------|---------|
+| vl_packaging_understanding | `nodes/vl_packaging_understanding_node.py` | agent | **VL多模态端到端包装理解**：直接调用豆包Seed-2.0-Pro多模态模型理解包装图片，提取品牌/品名/配料/营养表/生产日期/条形码等全部可见信息，跳过传统OCR管线 | - | `config/vl_packaging_llm_cfg.json` |
+| knowledge_inference | `nodes/knowledge_inference_node.py` | agent | **知识图谱RAG推理**：对已提取的结构化信息进行知识库链式推理，补充缺失字段（保质期/存储条件/注意事项），验证已有字段合理性 | - | `config/knowledge_inference_llm_cfg.json` |
+
+### V5.2 处理流程
+```
+image_preprocess → ocr_recognize → correct_text → model_extract 
+    → knowledge_inference (⑦知识推理补充) 
+    → vl_packaging_understanding (⑥VL多模态端到端理解)
+    → qa_answer → result_output → feishu_notify → END
+```
+
+### V5.2 关键配置说明
+- **VL节点模型**: `doubao-seed-2-0-pro-260215`（支持图片输入的多模态大模型）
+- **知识推理模型**: `doubao-seed-2-0-pro-260215`（链式推理能力）
+- **VL节点SP**: 商品包装多模态理解专家角色，要求直接"看"包装图片提取所有信息
+- **知识推理SP**: 商品知识图谱推理专家，基于已有信息推断缺失字段并标注置信度
 
 ### 核心特性
 - RapidOCR(ONNX)主引擎 + Tesseract多PSM扫描 + **PaddleOCR多引擎融合**
