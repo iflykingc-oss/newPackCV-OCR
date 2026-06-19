@@ -18,6 +18,19 @@
             "max_tokens": 2048,
             "num_visual_tokens": 256
         },
+        "custom_engines": [
+            {
+                "name": "my-vllm-ocr",
+                "endpoint": "",
+                "model": "",
+                "api_key": "",
+                "priority": 0,
+                "prompt": "请识别这张图片中的所有文字，保持原始排版。",
+                "max_tokens": 4096,
+                "temperature": 0.1,
+                "min_confidence": 0.4
+            }
+        ],
         "fallback": {
             "engine_type": "builtin"
         }
@@ -32,6 +45,20 @@
             "max_tokens": 4096,
             "temperature": 0.1
         },
+        "custom_engines": [
+            {
+                "name": "my-vllm-vl",
+                "endpoint": "",
+                "model": "",
+                "api_key": "",
+                "priority": 0,
+                "json_mode": true,
+                "prompt": "请提取这张产品包装图片中的结构化信息",
+                "max_tokens": 4096,
+                "temperature": 0.1,
+                "min_confidence": 0.5
+            }
+        ],
         "fallback": {
             "llm_config": "config/vl_packaging_llm_cfg.json"
         }

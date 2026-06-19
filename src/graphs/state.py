@@ -273,6 +273,12 @@ class GraphInput(BaseModel):
     user_question: Optional[str] = Field(default="", description="用户提问（仅用于qa模式）")
     target_language: Optional[str] = Field(default="auto", description="目标语言：auto（自动检测）、zh、en、ja、ko、fr、de、es")
     api_key: Optional[str] = Field(default=None, description="API Key（用于身份鉴权）")
+    custom_model_config: Optional[Dict[str, Any]] = Field(
+        default=None,
+        description="自定义模型配置（运行时覆盖engine_adapter_cfg.json中的custom_engines）。"
+                    "格式: {\"ocr\": [{\"name\":\"...\", \"endpoint\":\"...\", \"model\":\"...\", \"api_key\":\"...\", \"priority\":0}],"
+                    " \"vl\": [{\"name\":\"...\", \"endpoint\":\"...\", \"model\":\"...\", \"api_key\":\"...\", \"priority\":0}]}"
+    )
 
 
 class GraphOutput(BaseModel):
@@ -320,6 +326,7 @@ class OCRRecognizeInput(BaseModel):
     processing_info: Optional[Dict[str, Any]] = Field(default=None, description="预处理阶段的质量评估信息")
     ocr_engine_type: Literal["builtin", "api", "rapidocr", "paddleocr", "tesseract", "smart"] = Field(default="builtin", description="OCR引擎类型")
     ocr_api_config: Optional[Dict[str, Any]] = Field(default=None, description="OCR API配置")
+    custom_model_config: Optional[Dict[str, Any]] = Field(default=None, description="运行时自定义模型配置，覆盖配置文件中的custom_engines")
 
 
 class OCRRecognizeOutput(BaseModel):
@@ -467,6 +474,7 @@ class VLPackagingInput(BaseModel):
     model_name: str = Field(default="doubao-seed-2-0-pro-260215", description="多模态模型名称")
     ocr_reference_text: Optional[str] = Field(default=None, description="V5.6 VLM-First: 辅助OCR参考文本（VL为主，OCR为辅）")
     vlm_primary: bool = Field(default=True, description="V5.6 是否启用VLM-First模式（以视觉为主）")
+    custom_model_config: Optional[Dict[str, Any]] = Field(default=None, description="运行时自定义模型配置，覆盖配置文件中的custom_engines")
 
 
 class VLPackagingOutput(BaseModel):
@@ -977,7 +985,8 @@ class OCRRecognizeInputV2(BaseModel):
     use_paddle_ocr_v5: bool = Field(default=True, description="是否使用PP-OCRv5模型")
     # 原有参数
     ocr_engine_type: Literal["builtin", "api", "tesseract", "smart"] = Field(default="builtin", description="OCR引擎类型")
-    ocr_api_config: Optional[Dict[str, Any]] = Field(default=None, description="OCR API配置")
+    ocr_api_config: Optional[Dict[str, Any]] = Field(default=None, description="外部OCR API配置")
+    custom_model_config: Optional[Dict[str, Any]] = Field(default=None, description="运行时自定义模型配置，覆盖配置文件中的custom_engines")
 
 
 class OCRRecognizeOutputV2(BaseModel):

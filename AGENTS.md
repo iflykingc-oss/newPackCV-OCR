@@ -462,7 +462,9 @@ image_preprocess → image_quality_enhance → text_curvature_correct → image_
 | `src/config/engine_adapter_cfg.json` | **新建** | 引擎配置（API/本地/auto三模式） |
 | `src/graphs/nodes/ocr_recognize_node.py` | 修改 | 新增`ocr_engine_type="smart"`分支 + SmartOCREngine前置尝试 |
 | `src/graphs/nodes/vl_packaging_understanding_node.py` | 修改 | 新增SmartVLEngine前置尝试 + engine_used记录 |
-| `src/graphs/state.py` | 修改 | 新增`engine_used`字段到VLPackagingOutput；ocr_engine_type Literal增加"smart" |
+| `src/graphs/state.py` | 修改 | 新增`engine_used`字段到VLPackagingOutput；ocr_engine_type Literal增加"smart"；GraphInput新增`custom_model_config` |
+| `src/utils/ocr_engines/custom_ocr.py` | **新建** | OpenAI兼容API端点通用OCR适配器（支持任意模型） |
+| `src/utils/vl_engines/custom_vl.py` | **新建** | OpenAI兼容API端点通用VL适配器（支持任意模型） |
 
 #### 验证
 - ✅ `ocr_engine_type="builtin"` 管线编译通过、端到端运行正常
@@ -470,6 +472,69 @@ image_preprocess → image_quality_enhance → text_curvature_correct → image_
 - ✅ SmartOCREngine引擎状态检测正常（LightOn/DeepSeek❌不可用, Fallback✅可用）
 - ✅ SmartVLEngine引擎状态检测正常（MiniCPM-o❌不可用, FallbackVL✅可用）
 - ✅ Auto-grading：无GPU无API Key时静默降级，不报错不中断
+
+### V5.7.1 自定义模型支持（2026-06-24）
+
+#### 配置入口（支持3级配置链）
+
+**① 配置文件**（`src/config/engine_adapter_cfg.json`）— 静态全局配置
+```json
+{
+  "ocr_engines": {
+    "custom_engines": [
+      {
+        "name": "my-vllm-server",
+        "endpoint": "https://my-server/v1/chat/completions",
+        "model": "my-ocr-model",
+        "api_key": "sk-xxx",
+        "priority": 1,
+        "type": "openai_compatible"
+      }
+    ]
+  },
+  "vl_engines": {
+    "custom_engines": [
+      {
+        "name": "my-custom-vl",
+        "endpoint": "https://my-server/v1/chat/completions",
+        "model": "qwen-vl-max",
+        "api_key": "sk-xxx",
+        "priority": 1,
+        "type": "openai_compatible"
+      }
+    ]
+  }
+}
+```
+
+**② GraphInput运行时传递** — 按请求注入（最高优先级）
+```json
+{
+  "custom_model_config": {
+    "ocr": [{"name": "runtime-ocr", "endpoint": "https://...", "model": "gpt-4o", "api_key": "sk-xxx"}],
+    "vl":  [{"name": "runtime-vl",  "endpoint": "https://...", "model": "claude-3.5", "api_key": "sk-xxx"}]
+  }
+}
+```
+
+**③ Web Admin API**（`/api/admin/models`）— 运行时热更新（可选实现）
+
+#### 引擎优先级
+```
+自定义引擎（最高）→ LightOnOCR/DeepSeek/MiniCPM-o（内置）→ Fallback（保底）
+```
+
+#### 通用OpenAI兼容适配器
+| 组件 | 文件 | 说明 |
+|------|------|------|
+| `CustomOCREngine` | `src/utils/ocr_engines/custom_ocr.py` | 调用任意OpenAI兼容端点的OCR引擎 |
+| `CustomVLEngine` | `src/utils/vl_engines/custom_vl.py` | 调用任意OpenAI兼容端点的VL引擎 |
+| SmartRouter集成 | `smart_router.py` | 自动加载 `custom_engines` 数组，设最高优先级 |
+
+#### 验证
+- ✅ `custom_engines` 空数组时正常工作（没有自定义引擎）
+- ✅ `custom_model_config` 通过GraphInput注入时正确合并到引擎链
+- ✅ 自定义引擎不可用时（无端点），正确降级到内置引擎
 - ✅ 有GPU/API Key时自动升级到最优引擎
 
 #### 后续升级路径

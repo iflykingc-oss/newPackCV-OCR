@@ -1038,7 +1038,7 @@ def ocr_recognize_node(
             processing_time=time.time() - start_time
         )
 
-    # ====== Smart OCR Engine (LightOnOCR/DeepSeek-OCR) ======
+    # ====== Smart OCR Engine (自定义模型/LightOnOCR/DeepSeek-OCR) ======
     if state.ocr_engine_type == "smart" or state.ocr_engine_type == "auto":
         try:
             from utils.ocr_engines.smart_router import SmartOCREngine
@@ -1049,10 +1049,26 @@ def ocr_recognize_node(
             if os.path.exists(engine_cfg_path):
                 with open(engine_cfg_path) as f:
                     engine_cfg = json.load(f)
+
+                # 合并运行时自定义模型配置（来自GraphInput.custom_model_config）
+                runtime_custom = state.custom_model_config
+                if runtime_custom and isinstance(runtime_custom, dict):
+                    runtime_ocr = runtime_custom.get("ocr", [])
+                    # GraphInput中的自定义引擎优先级最高，覆盖配置文件
+                    if runtime_ocr:
+                        existing_custom = engine_cfg.get("ocr_engines", {}).get("custom_engines", [])
+                        engine_cfg["ocr_engines"]["custom_engines"] = runtime_ocr + existing_custom
+                        logger.info(f"从GraphInput加载了 {len(runtime_ocr)} 个运行时自定义OCR引擎")
+
                 smart_engine = SmartOCREngine(engine_cfg)
-                if any(smart_engine.get_engine_status().get(e, {}).get("available", False)
-                       for e in ["lighton_ocr", "deepseek_ocr"]):
-                    logger.info("SmartOCR引擎可用，尝试高级OCR...")
+                status = smart_engine.get_engine_status()
+                # 检查是否有任何可用引擎（自定义引擎 / LightOn / DeepSeek）
+                available_engines = [name for name, s in status.items() if s.get("available", False)]
+                # 排除fallback（始终可用）
+                advanced_available = [e for e in available_engines if e != "fallback"]
+
+                if advanced_available:
+                    logger.info(f"SmartOCR引擎可用: {advanced_available}，尝试高级OCR...")
                     result = smart_engine.recognize(image_url)
                     if result.success and result.confidence >= 0.3 and len(result.raw_text.strip()) > 20:
                         elapsed = time.time() - start_time
@@ -1068,6 +1084,8 @@ def ocr_recognize_node(
                         )
                     else:
                         logger.info(f"SmartOCR未达要求, 降级到本地OCR")
+                else:
+                    logger.info(f"无可用高级OCR引擎, 降级到本地OCR")
         except Exception as e:
             logger.warning(f"SmartOCR初始化失败: {e}, 降级到本地OCR")
 
