@@ -238,3 +238,49 @@ image_preprocess → ocr_recognize → correct_text → model_extract
 - ✅ test_run 端到端通过（发票测试图：product_type="其他"，21个字段全部正确提取）
 - ✅ 7个文件py_compile通过
 - ✅ 下游节点零改动兼容
+
+### V5.5 三线并行（产品力+商业化+平台发布）（2026-06-19）
+
+#### 三线并行概况
+| 线 | 方向 | 状态 | 关键交付 |
+|----|------|------|---------|
+| A | 评测基建 | ✅ 数据就绪 | HalalBench找不到实际repo，GroceryStoreDataset 5,522张下载到assets/benchmark/ |
+| B | 商业化产品化 | ✅ 完整上线 | API Key鉴权+用户管理+Web Demo+对象存储上传+用量统计+免费模式 |
+| C | 技术纵深 | ✅ 完成 | 图像质量路由+语种自动检测+VL/OCR真正并行+OpenAPI文档 |
+
+#### 核心改动清单
+
+**A线 - 评测基建**
+| 文件 | 改动 |
+|-----|------|
+| `scripts/auto_label_benchmark.py` | 创建：GroceryStoreDataset遍历→LLM自动标注→ground_truth JSON |
+| `scripts/benchmark_evaluate.py` | 创建：批量跑packcv管线→逐字段对比→品类级精度报告HTML |
+| `assets/benchmark/GroceryStoreDataset/` | 5,522张商品图，train/test/val split，81品类 |
+| `assets/benchmark/ground_truth/` | 自动标注黄金标准目录 |
+| `assets/benchmark/reports/` | 精度报告输出目录 |
+
+**B线 - 商业化基础设施**
+| 文件 | 改动 |
+|-----|------|
+| `src/web_server.py` | ⭐ 大规模重构：新增SQLite用户注册/登录、API Key生成(JWT)、速率限制(滑动窗口sled)、用量日志、免费模式(10次/h)+付费模式(100次/h)、`/ocr/upload`文件上传接口、`/api/admin/stats`总览、`/api/admin/usage`详情 |
+| `src/static/demo.html` | 创建：Web Demo拖拽上传→即时JSON展示→卡片/JSON双视图→美观UI |
+| `src/graphs/state.py` | 新增 `ApiKeyCreateRequest/Response` 数据模型 |
+
+**C线 - 技术纵深**
+| 文件 | 改动 |
+|-----|------|
+| `src/graphs/nodes/image_quality_router_node.py` | 创建：图像质量评分(亮度/对比度/清晰度/噪声/倾斜)→管线路由(full/ocr_only/vl_only/enhance_full)+语种自动检测→输出selected_pipeline+auto_language |
+| `src/graphs/graph.py` | 重构：新增image_quality_router入口路由→条件分支→减负接入：高质量→full并行、低质量→enhance_full |
+| `src/graphs/state.py` | 新增`QualityRouterInput/Output`，GlobalState新增`selected_pipeline/auto_language`，GraphInput新增`target_language` |
+
+#### 产品力提升数据
+- 图像质量路由：4级路由（full/ocr_only/vl_only/enhance_full）+ 语种自动检测
+- API Key管理：注册→登录→API Key生成→速率限制→用量统计
+- 对象存储上传：Web Demo上传图片→自动转存→OCR识别
+- Web Demo：拖拽上传→卡片展示→JSON双视图
+
+#### 验证
+- ✅ test_run 端到端通过（selected_pipeline="full", auto_language="zh"）
+- ✅ 全部文件py_compile通过
+- ✅ 5,522张GroceryStoreDataset下载就绪
+- ✅ API注册/登录/API Key生成全链路可用

@@ -1,0 +1,178 @@
+<!DOCTYPE html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<meta name="viewport" content="width=device-width, initial-scale=1.0">
+<title>PackCV-OCR 商品识别平台</title>
+<style>
+* { margin: 0; padding: 0; box-sizing: border-box; }
+body { font-family: -apple-system, BlinkMacSystemFont, 'Segoe UI', Roboto, sans-serif; background: #f0f2f5; min-height: 100vh; }
+.header { background: linear-gradient(135deg, #667eea 0%, #764ba2 100%); color: white; padding: 40px 20px; text-align: center; }
+.header h1 { font-size: 32px; margin-bottom: 8px; }
+.header p { opacity: 0.9; font-size: 16px; }
+.container { max-width: 900px; margin: -30px auto 40px; padding: 0 20px; position: relative; }
+.card { background: white; border-radius: 12px; box-shadow: 0 4px 20px rgba(0,0,0,0.1); padding: 30px; margin-bottom: 20px; }
+.upload-area { border: 2px dashed #d0d5dd; border-radius: 12px; padding: 50px 20px; text-align: center; cursor: pointer; transition: all .3s; background: #fafbfc; }
+.upload-area:hover, .upload-area.dragover { border-color: #667eea; background: #f0f2ff; }
+.upload-area .icon { font-size: 48px; margin-bottom: 12px; }
+.upload-area .text { color: #667; font-size: 16px; }
+.upload-area .sub { color: #999; font-size: 13px; margin-top: 8px; }
+.hidden { display: none; }
+#preview { max-width: 300px; max-height: 300px; margin: 20px auto; display: none; border-radius: 8px; box-shadow: 0 2px 8px rgba(0,0,0,0.1); }
+.loading { display: none; text-align: center; padding: 30px; }
+.spinner { width: 40px; height: 40px; border: 4px solid #e0e0e0; border-top: 4px solid #667eea; border-radius: 50%; animation: spin .8s linear infinite; margin: 0 auto 12px; }
+@keyframes spin { to { transform: rotate(360deg); } }
+.result-area { display: none; }
+.tabs { display: flex; gap: 8px; margin-bottom: 16px; }
+.tab { padding: 8px 20px; border-radius: 8px; border: 1px solid #e0e0e0; cursor: pointer; font-size: 14px; background: white; transition: all .2s; }
+.tab.active { background: #667eea; color: white; border-color: #667eea; }
+.tab-content { display: none; }
+.tab-content.active { display: block; }
+pre { background: #1e1e2e; color: #cdd6f4; padding: 16px; border-radius: 8px; overflow-x: auto; font-size: 13px; line-height: 1.6; }
+.field-grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(250px, 1fr)); gap: 12px; }
+.field-card { background: #f8f9ff; border-radius: 8px; padding: 12px; border-left: 3px solid #667eea; }
+.field-label { font-size: 12px; color: #889; font-weight: 600; text-transform: uppercase; margin-bottom: 4px; }
+.field-value { font-size: 14px; color: #333; word-break: break-word; }
+.field-value.null { color: #999; font-style: italic; }
+.status-bar { display: flex; gap: 16px; flex-wrap: wrap; padding: 12px; background: #f8f9ff; border-radius: 8px; margin-bottom: 16px; font-size: 13px; color: #666; }
+.status-item span { font-weight: 600; color: #333; }
+.cta-buttons { margin-top: 20px; text-align: center; }
+.btn { display: inline-block; padding: 12px 32px; border-radius: 8px; font-size: 16px; text-decoration: none; transition: all .2s; }
+.btn-primary { background: linear-gradient(135deg, #667eea, #764ba2); color: white; }
+.btn-primary:hover { transform: translateY(-1px); box-shadow: 0 4px 12px rgba(102,126,234,0.4); }
+</style>
+</head>
+<body>
+<div class="header">
+    <h1>📦 PackCV-OCR</h1>
+    <p>商品包装结构化信息提取平台 · 上传图片即得标准化数据</p>
+</div>
+<div class="container">
+    <div class="card">
+        <div class="upload-area" id="uploadArea">
+            <div class="icon">🖼️</div>
+            <div class="text">拖拽图片到此处，或点击选择文件</div>
+            <div class="sub">支持 JPG / PNG / WebP，单张不超过 10MB</div>
+            <input type="file" id="fileInput" accept="image/*" class="hidden">
+        </div>
+        <img id="preview" alt="预览">
+        <div class="loading" id="loading">
+            <div class="spinner"></div>
+            <div style="color:#667">正在分析商品包装...</div>
+        </div>
+    </div>
+
+    <div class="result-area card" id="resultArea">
+        <div class="status-bar" id="statusBar"></div>
+        <div class="tabs">
+            <div class="tab active" data-tab="card">📋 卡片</div>
+            <div class="tab" data-tab="json">📄 JSON</div>
+        </div>
+        <div class="tab-content active" id="tabCard">
+            <div class="field-grid" id="fieldGrid"></div>
+        </div>
+        <div class="tab-content" id="tabJson">
+            <pre id="jsonView"></pre>
+        </div>
+    </div>
+
+    <div class="card cta-buttons">
+        <p style="margin-bottom:16px;color:#666">开始构建你的自动化商品信息管线</p>
+        <a href="/docs" class="btn btn-primary" target="_blank">📖 API 文档</a>
+    </div>
+</div>
+
+<script>
+const uploadArea = document.getElementById('uploadArea');
+const fileInput = document.getElementById('fileInput');
+const preview = document.getElementById('preview');
+const loading = document.getElementById('loading');
+const resultArea = document.getElementById('resultArea');
+const fieldGrid = document.getElementById('fieldGrid');
+const jsonView = document.getElementById('jsonView');
+const statusBar = document.getElementById('statusBar');
+
+uploadArea.addEventListener('click', () => fileInput.click());
+uploadArea.addEventListener('dragover', e => { e.preventDefault(); uploadArea.classList.add('dragover'); });
+uploadArea.addEventListener('dragleave', () => uploadArea.classList.remove('dragover'));
+uploadArea.addEventListener('drop', e => { e.preventDefault(); uploadArea.classList.remove('dragover'); handleFile(e.dataTransfer.files[0]); });
+fileInput.addEventListener('change', e => handleFile(e.target.files[0]));
+
+async function handleFile(file) {
+    if (!file) return;
+    if (!file.type.match('image.*')) { alert('请选择图片文件'); return; }
+    
+    preview.style.display = 'none';
+    loading.style.display = 'block';
+    resultArea.style.display = 'none';
+    
+    const reader = new FileReader();
+    reader.onload = e => { preview.src = e.target.result; };
+    reader.readAsDataURL(file);
+    
+    const formData = new FormData();
+    formData.append('file', file);
+    
+    try {
+        const resp = await fetch('/ocr/upload', { method: 'POST', body: formData });
+        if (!resp.ok) throw new Error(`HTTP ${resp.status}: ${await resp.text()}`);
+        const result = await resp.json();
+        showResult(result);
+    } catch (err) {
+        loading.style.display = 'none';
+        alert('识别失败: ' + err.message);
+    }
+}
+
+function showResult(data) {
+    loading.style.display = 'none';
+    preview.style.display = 'block';
+    resultArea.style.display = 'block';
+    
+    // 状态栏
+    const sd = data.structured_data || {};
+    const fieldCount = Object.keys(sd).length;
+    statusBar.innerHTML = `
+        <div class="status-item">品类: <span>${sd.product_type || sd.document_type || '自动检测中'}</span></div>
+        <div class="status-item">品牌: <span>${sd.brand || '-'}</span></div>
+        <div class="status-item">产品: <span>${sd.product_name || sd.goods_name || '-'}</span></div>
+        <div class="status-item">提取字段: <span>${fieldCount}</span></div>
+    `;
+    
+    // 字段卡片
+    fieldGrid.innerHTML = '';
+    for (const [key, val] of Object.entries(sd)) {
+        if (key.startsWith('_')) continue;
+        if (typeof val === 'object' && val !== null && !Array.isArray(val)) continue;
+        const card = document.createElement('div');
+        card.className = 'field-card';
+        const label = document.createElement('div');
+        label.className = 'field-label';
+        label.textContent = key;
+        const value = document.createElement('div');
+        value.className = 'field-value' + (val === null || val === undefined || val === '' ? ' null' : '');
+        value.textContent = val === null || val === '' ? '—' : (Array.isArray(val) ? val.join(', ') : String(val));
+        card.appendChild(label);
+        card.appendChild(value);
+        fieldGrid.appendChild(card);
+    }
+    
+    // JSON视图
+    jsonView.textContent = JSON.stringify(data, null, 2);
+    
+    // 滚动到结果
+    resultArea.scrollIntoView({ behavior: 'smooth', block: 'start' });
+}
+
+// Tab切换
+document.querySelectorAll('.tab').forEach(tab => {
+    tab.addEventListener('click', () => {
+        document.querySelectorAll('.tab').forEach(t => t.classList.remove('active'));
+        document.querySelectorAll('.tab-content').forEach(t => t.classList.remove('active'));
+        tab.classList.add('active');
+        document.getElementById('tab' + tab.dataset.tab.charAt(0).toUpperCase() + tab.dataset.tab.slice(1)).classList.add('active');
+    });
+});
+</script>
+</body>
+</html>

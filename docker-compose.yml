@@ -1,0 +1,25 @@
+version: '3.8'
+
+services:
+  packcv-ocr:
+    build: .
+    container_name: packcv-ocr
+    ports:
+      - "9000:9000"
+    volumes:
+      - ./data:/app/data
+      - ./logs:/app/logs
+      - ./assets:/app/assets
+    environment:
+      - COZE_WORKSPACE_PATH=/app
+      - TESSDATA_PREFIX=/usr/share/tesseract-ocr/5/tessdata/
+    restart: unless-stopped
+    healthcheck:
+      test: ["CMD", "curl", "-f", "http://localhost:9000/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+volumes:
+  data:
+  logs:

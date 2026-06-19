@@ -37,6 +37,8 @@ from graphs.nodes.multi_channel_fusion_node import multi_channel_fusion_node
 from graphs.nodes.category_template_node import category_template_node
 from graphs.nodes.call_audit_node import call_audit_node
 from graphs.nodes.multi_language_ocr_node import multi_language_ocr_node
+# V5.5 图像质量路由
+from graphs.nodes.image_quality_router_node import image_quality_router_node
 
 
 def route_processing_mode(state: GlobalState) -> str:
@@ -105,6 +107,9 @@ builder.add_node("category_template", category_template_node)
 builder.add_node("multi_language_ocr", multi_language_ocr_node)
 builder.add_node("call_audit", call_audit_node)
 
+# ===== V5.5 图像质量路由 =====
+builder.add_node("image_quality_router", image_quality_router_node)
+
 # 设置入口点（路由节点）
 builder.set_entry_point("route_processing")
 
@@ -121,15 +126,18 @@ builder.add_conditional_edges(
 # 批量处理 -> 结束
 builder.add_edge("batch_process", END)
 
-# ===== 单图处理流程 =====
-# 1) 主OCR通道：图片预处理 -> OCR识别 -> 智能纠错 -> 结构化提取
-builder.add_edge("image_preprocess", "ocr_recognize")
+# 单图处理流程：增加图像质量路由节点预处理后分发
+
+# 新增图像质量路由节点
+builder.add_edge("image_preprocess", "image_quality_router")
+
+# 1) 主OCR通道：图片预处理 -> 图像质量路由 -> OCR识别 -> 智能纠错 -> 结构化提取
+builder.add_edge("image_quality_router", "ocr_recognize")
 builder.add_edge("ocr_recognize", "correct_text")
 builder.add_edge("correct_text", "model_extract")
 
-# 2) VL并行通道：与model_extract并行，从image_preprocess出发
-#    VL结果与OCR结果在 multi_channel_fusion 节点融合
-builder.add_edge("image_preprocess", "vl_packaging_understanding")
+# 2) VL并行通道：与model_extract并行，从image_quality_router出发
+builder.add_edge("image_quality_router", "vl_packaging_understanding")
 
 # 3) 多通道融合：OCR + VL字段级加权融合
 #    model_extract 和 vl_packaging_understanding 都汇入 multi_channel_fusion

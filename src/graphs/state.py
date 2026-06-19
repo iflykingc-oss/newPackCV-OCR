@@ -107,6 +107,10 @@ class GlobalState(BaseModel):
     node_metrics: Optional[Dict[str, float]] = Field(default_factory=dict, description="节点级耗时指标")
     enable_audit: Optional[bool] = Field(default=True, description="是否启用调用审计")
     
+    # V5.5 图像质量路由 & 自动语种
+    selected_pipeline: Optional[str] = Field(default="full", description="选中的处理管线: full/ocr_only/vl_only/enhance_full")
+    auto_language: Optional[str] = Field(default="zh", description="自动检测的语言")
+    
     # 输出数据
     final_result: Dict[str, Any] = Field(default_factory=dict, description="最终输出结果")
     export_file_url: Optional[str] = Field(default="", description="导出文件URL（TXT/PDF/Excel）")
@@ -202,6 +206,8 @@ class GraphInput(BaseModel):
     platform: Literal["wechat", "feishu", "none"] = Field(default="none", description="目标平台：wechat（微信）、feishu（飞书）、none（不推送）")
     export_format: Literal["json", "excel", "pdf"] = Field(default="json", description="导出格式")
     user_question: Optional[str] = Field(default="", description="用户提问（仅用于qa模式）")
+    target_language: Optional[str] = Field(default="auto", description="目标语言：auto（自动检测）、zh、en、ja、ko、fr、de、es")
+    api_key: Optional[str] = Field(default=None, description="API Key（用于身份鉴权）")
 
 
 class GraphOutput(BaseModel):
@@ -217,6 +223,10 @@ class GraphOutput(BaseModel):
     # 兼容性字段
     raw_text: Optional[str] = Field(default=None, description="OCR识别结果（兼容字段）")
     answer: Optional[str] = Field(default=None, description="问答答案（兼容字段）")
+    
+    # V5.5
+    selected_pipeline: Optional[str] = Field(default=None, description="选中的处理管线")
+    auto_language: Optional[str] = Field(default=None, description="自动检测的语言")
 
 
 # ==================== 图片预处理节点 ====================
@@ -989,3 +999,35 @@ class StructureParseOutput(BaseModel):
     processing_time: float = Field(default=0.0, description="处理耗时（秒）")
 
     error_message: Optional[str] = Field(default=None, description="错误信息")
+
+
+# --- V5.5 图像质量路由（2026-06-19新增）---
+class QualityRouterInput(BaseModel):
+    """图像质量路由节点输入"""
+    package_image: File = Field(..., description="商品包装图片")
+    ocr_engine_type: str = Field(default="builtin", description="OCR引擎类型")
+
+
+class QualityRouterOutput(BaseModel):
+    """图像质量路由节点输出"""
+    selected_pipeline: str = Field(..., description="选中的处理管线: full/ocr_only/vl_only/enhance_full")
+    quality_score: int = Field(default=0, description="图像质量评分(0-100)")
+    image_width: int = Field(default=0, description="图像宽度(px)")
+    image_height: int = Field(default=0, description="图像高度(px)")
+    quality_detail: Dict[str, Any] = Field(default_factory=dict, description="质量评估详情")
+    auto_language: str = Field(default="zh", description="自动检测的语言")
+    pipeline_reason: str = Field(default="", description="路由选择原因")
+
+
+# --- V5.5 API Key & 用户管理（2026-06-19新增）---
+class ApiKeyCreateRequest(BaseModel):
+    """创建API Key请求"""
+    user_id: str = Field(..., description="用户ID")
+
+
+class ApiKeyCreateResponse(BaseModel):
+    """创建API Key响应"""
+    api_key: str = Field(..., description="生成的API Key")
+    user_id: str = Field(..., description="用户ID")
+    created_at: str = Field(..., description="创建时间")
+    expires_at: str = Field(..., description="过期时间")
