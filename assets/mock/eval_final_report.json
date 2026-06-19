@@ -1,0 +1,268 @@
+{
+  "report_time": "2026-06-19T14:07:40.248974",
+  "valid_tests": 12,
+  "total_images": 12,
+  "packcv_total_fields": 51,
+  "tesseract_total_fields": 1,
+  "packcv_advantage": 50,
+  "quality_distribution": {
+    "good": 7,
+    "excellent": 3,
+    "poor": 2
+  },
+  "results": [
+    {
+      "image": "front_shrimp_crackers.jpeg",
+      "category": "零食虾片/薯片",
+      "packcv": {
+        "fields": 3,
+        "names": [
+          "brand",
+          "product_name",
+          "specification"
+        ],
+        "quality": "good"
+      },
+      "tesseract": {
+        "fields": 0,
+        "names": [],
+        "text_len": 377,
+        "time_s": 6.307
+      },
+      "advantage": 3
+    },
+    {
+      "image": "back_biscuit.jpeg",
+      "category": "饼干背面标签",
+      "packcv": {
+        "fields": 8,
+        "names": [
+          "ingredients",
+          "nutrition_facts",
+          "manufacturer",
+          "manufacturer_address",
+          "shelf_life",
+          "storage_condition",
+          "other_info"
+        ],
+        "quality": "excellent"
+      },
+      "tesseract": {
+        "fields": 0,
+        "names": [],
+        "text_len": 543,
+        "time_s": 6.425
+      },
+      "advantage": 8
+    },
+    {
+      "image": "back_chips.jpeg",
+      "category": "薯片背面标签",
+      "packcv": {
+        "fields": 6,
+        "names": [
+          "product_name",
+          "ingredients",
+          "nutrition_facts",
+          "manufacturer",
+          "shelf_life"
+        ],
+        "quality": "good"
+      },
+      "tesseract": {
+        "fields": 0,
+        "names": [],
+        "text_len": 276,
+        "time_s": 5.384
+      },
+      "advantage": 6
+    },
+    {
+      "image": "back_candy.jpeg",
+      "category": "糖果/巧克力包装",
+      "packcv": {
+        "fields": 7,
+        "names": [
+          "manufacturer",
+          "specification",
+          "license_number",
+          "ingredients",
+          "nutrition_facts",
+          "other_info"
+        ],
+        "quality": "excellent"
+      },
+      "tesseract": {
+        "fields": 0,
+        "names": [],
+        "text_len": 0,
+        "time_s": 2.692
+      },
+      "advantage": 7
+    },
+    {
+      "image": "front_noodles.jpeg",
+      "category": "方便面包装正面",
+      "packcv": {
+        "fields": 2,
+        "names": [
+          "brand",
+          "product_name"
+        ],
+        "quality": "good"
+      },
+      "tesseract": {
+        "fields": 0,
+        "names": [],
+        "text_len": 62,
+        "time_s": 4.891
+      },
+      "advantage": 2
+    },
+    {
+      "image": "front_tea_drink.jpeg",
+      "category": "茶饮料瓶标",
+      "packcv": {
+        "fields": 3,
+        "names": [
+          "brand",
+          "product_name",
+          "specification"
+        ],
+        "quality": "good"
+      },
+      "tesseract": {
+        "fields": 0,
+        "names": [],
+        "text_len": 51,
+        "time_s": 3.371
+      },
+      "advantage": 3
+    },
+    {
+      "image": "back_yogurt.jpeg",
+      "category": "酸奶饮品背面标签",
+      "packcv": {
+        "fields": 1,
+        "names": [
+          "other_info"
+        ],
+        "quality": "poor"
+      },
+      "tesseract": {
+        "fields": 0,
+        "names": [],
+        "text_len": 141,
+        "time_s": 6.064
+      },
+      "advantage": 1
+    },
+    {
+      "image": "front_soysauce.jpeg",
+      "category": "酱油瓶标签正面",
+      "packcv": {
+        "fields": 3,
+        "names": [
+          "brand",
+          "product_name",
+          "specification"
+        ],
+        "quality": "good"
+      },
+      "tesseract": {
+        "fields": 0,
+        "names": [],
+        "text_len": 78,
+        "time_s": 4.559
+      },
+      "advantage": 3
+    },
+    {
+      "image": "back_sauce.jpeg",
+      "category": "酱料瓶背面标签",
+      "packcv": {
+        "fields": 5,
+        "names": [
+          "specification",
+          "license_number",
+          "storage_condition",
+          "nutrition_table",
+          "other_info"
+        ],
+        "quality": "good"
+      },
+      "tesseract": {
+        "fields": 0,
+        "names": [],
+        "text_len": 6,
+        "time_s": 2.698
+      },
+      "advantage": 5
+    },
+    {
+      "image": "back_cleaner.jpeg",
+      "category": "清洁用品瓶标",
+      "packcv": {
+        "fields": 5,
+        "names": [
+          "ingredients",
+          "usage",
+          "manufacturer",
+          "license_number",
+          "precautions"
+        ],
+        "quality": "good"
+      },
+      "tesseract": {
+        "fields": 1,
+        "names": [
+          "barcode"
+        ],
+        "text_len": 389,
+        "time_s": 4.869
+      },
+      "advantage": 4
+    },
+    {
+      "image": "shampoo_label.jpeg",
+      "category": "洗发水/护发素瓶标",
+      "packcv": {
+        "fields": 0,
+        "names": [],
+        "quality": "poor"
+      },
+      "tesseract": {
+        "fields": 0,
+        "names": [],
+        "text_len": 0,
+        "time_s": 2.621
+      },
+      "advantage": 0
+    },
+    {
+      "image": "medicine_package.jpeg",
+      "category": "OTC药品包装",
+      "packcv": {
+        "fields": 8,
+        "names": [
+          "product_name",
+          "license_number",
+          "usage",
+          "ingredients",
+          "notice",
+          "shelf_life",
+          "storage_condition",
+          "barcode"
+        ],
+        "quality": "excellent"
+      },
+      "tesseract": {
+        "fields": 0,
+        "names": [],
+        "text_len": 294,
+        "time_s": 9.034
+      },
+      "advantage": 8
+    }
+  ]
+}
