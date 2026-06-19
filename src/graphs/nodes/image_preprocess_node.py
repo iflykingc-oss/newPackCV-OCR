@@ -451,6 +451,104 @@ def _detect_and_correct_skew(img: np.ndarray) -> Tuple[np.ndarray, float]:
         return img, 0.0
 
 
+def _perspective_correction(img: np.ndarray) -> np.ndarray:
+    """
+    透视校正：针对曲面包装（瓶身/罐体/弧形标签）
+    检测图像中的四边形轮廓，做透视变换展平
+    适用于洗发水瓶、酸奶瓶、酱料瓶等曲面包装
+    """
+    if img is None or img.size == 0:
+        return img
+    
+    try:
+        h, w = img.shape[:2]
+        gray = cv2.cvtColor(img, cv2.COLOR_BGR2GRAY)
+        
+        # 1. 检查是否有明显的垂直方向扭曲（瓶子/罐体特征）
+        # 方法：检测图像中心区域的垂直边缘密集度
+        center_region = gray[:, w//4:3*w//4]
+        
+        # 2. Canny边缘检测
+        edges = cv2.Canny(center_region, 30, 100)
+        
+        # 3. 检测垂直线条（瓶身竖直边缘）
+        lines = cv2.HoughLinesP(edges, 1, np.pi/180, threshold=80, 
+                                minLineLength=int(h*0.3), maxLineGap=20)
+        
+        if lines is None or len(lines) < 4:
+            return img  # 线条不足，非透视场景
+        
+        # 4. 分离水平和垂直线条
+        v_lines = []  # 垂直线
+        for line in lines:
+            x1, y1, x2, y2 = line[0]
+            angle = abs(np.degrees(np.arctan2(y2 - y1, x2 - x1)))
+            if angle > 60:  # 接近垂直
+                v_lines.append(((x1 + x2) // 2, (y1 + y2) // 2))
+        
+        if len(v_lines) < 4:
+            return img  # 垂直线不足
+        
+        # 5. 估算透视变换
+        # 找到图像左右两侧的关键点
+        v_lines.sort(key=lambda p: p[0])  # 按x坐标排序
+        
+        # 取左右两侧最具代表性的点
+        left_x = np.mean([p[0] for p in v_lines[:len(v_lines)//4]]) if v_lines else w//4
+        right_x = np.mean([p[0] for p in v_lines[-len(v_lines)//4:]]) if v_lines else 3*w//4
+        
+        # 检测顶部和底部的水平偏移
+        top_lines = [p for p in v_lines if p[1] < h//3]
+        bot_lines = [p for p in v_lines if p[1] > 2*h//3]
+        
+        if len(top_lines) > 2 and len(bot_lines) > 2:
+            top_left = np.mean([p[0] for p in top_lines[:len(top_lines)//2]])
+            top_right = np.mean([p[0] for p in top_lines[-len(top_lines)//2:]])
+            bot_left = np.mean([p[0] for p in bot_lines[:len(bot_lines)//2]])
+            bot_right = np.mean([p[0] for p in bot_lines[-len(bot_lines)//2:]])
+            
+            # 检查是否有梯形变形（透视征兆）
+            top_width = top_right - top_left
+            bot_width = bot_right - bot_left
+            
+            if top_width > 0 and bot_width > 0:
+                width_ratio = top_width / bot_width if bot_width > top_width else bot_width / top_width
+                
+                # 如果上下宽度差异超过15%，认为是透视变形
+                if width_ratio > 1.15:
+                    logger.info(f"检测到透视变形: top_w={top_width:.0f}, bot_w={bot_width:.0f}, ratio={width_ratio:.2f}")
+                    
+                    # 计算透视变换源点和目标点
+                    margin = 20
+                    src_pts = np.float32([
+                        [max(0, top_left - margin), margin],           # 左上
+                        [min(w, top_right + margin), margin],           # 右上
+                        [max(0, bot_left - margin), h - margin],       # 左下
+                        [min(w, bot_right + margin), h - margin]        # 右下
+                    ])
+                    
+                    dst_w = int(max(top_width, bot_width)) + 2 * margin
+                    dst_pts = np.float32([
+                        [0, 0],
+                        [dst_w, 0],
+                        [0, h],
+                        [dst_w, h]
+                    ])
+                    
+                    # 计算透视变换矩阵
+                    matrix = cv2.getPerspectiveTransform(src_pts, dst_pts)
+                    corrected = cv2.warpPerspective(img, matrix, (dst_w, h),
+                                                    flags=cv2.INTER_CUBIC,
+                                                    borderMode=cv2.BORDER_REPLICATE)
+                    logger.info(f"透视校正完成: {w}x{h} -> {corrected.shape[1]}x{corrected.shape[0]}")
+                    return corrected
+    
+    except Exception as e:
+        logger.warning(f"透视校正失败: {e}")
+    
+    return img
+
+
 def enhance_for_ocr(img: np.ndarray) -> Tuple[np.ndarray, Dict[str, Any]]:
     """
     自适应OCR预处理管线
@@ -465,7 +563,16 @@ def enhance_for_ocr(img: np.ndarray) -> Tuple[np.ndarray, Dict[str, Any]]:
     if img is None or img.size == 0:
         return img, info
 
-    # 1. 质量评估
+    # 1. 透视校正（曲面包装展平）：先于质量评估，因为透视变形本身不算"低质量"
+    corrected = _perspective_correction(img)
+    if corrected.shape != img.shape:
+        logger.info(f"透视校正生效: {img.shape} -> {corrected.shape}")
+        img = corrected
+        info["perspective_corrected"] = True
+    else:
+        info["perspective_corrected"] = False
+
+    # 2. 质量评估
     quality_report = assess_image_quality(img)
     strategy = quality_report.get("recommended_strategy", "normal")
     quality_score = quality_report.get("quality_score", 50)
@@ -477,8 +584,14 @@ def enhance_for_ocr(img: np.ndarray) -> Tuple[np.ndarray, Dict[str, Any]]:
                 f"dark={quality_report['too_dark']}, "
                 f"contrast={quality_report['contrast']}")
 
-    # 2. 质量分级跳过预处理：高质量图（score > 70）直接返回原图
-    #    大幅提升识别速度，避免过度处理
+    # 3. 倾斜校正（补充透视校正后的旋转修正）
+    corrected_img, angle = _detect_and_correct_skew(img)
+    if abs(angle) > 0.5:
+        img = corrected_img
+        info["rotation_angle"] = round(angle, 2)
+        logger.info(f"倾斜校正: {angle:.2f}度")
+
+    # 4. 质量分级跳过预处理：高质量图（score > 70）直接返回
     if quality_score >= 70:
         logger.info(f"图片质量良好(score={quality_score})，跳过预处理增强")
         info["enhanced"] = False
@@ -486,7 +599,7 @@ def enhance_for_ocr(img: np.ndarray) -> Tuple[np.ndarray, Dict[str, Any]]:
         info["output_size"] = img.shape[:2]
         return img, info
 
-    # 3. 自适应增强（仅中低质量图需要）
+    # 5. 自适应增强（仅中低质量图需要）
     result = adaptive_enhance(img, strategy)
 
     info["enhanced"] = True

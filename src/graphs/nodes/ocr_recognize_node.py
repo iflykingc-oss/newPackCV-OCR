@@ -83,6 +83,25 @@ _ENABLE_PADDLE_OCR = os.getenv("ENABLE_PADDLEOCR", "0") == "1"
 # ==================== 引擎单例 ====================
 
 _rapid_ocr_instance = None
+_paddle_ocr_instance = None
+
+
+def _get_paddle_ocr():
+    """获取PaddleOCR单例（中文场景最佳引擎）"""
+    global _paddle_ocr_instance
+    if _paddle_ocr_instance is None:
+        try:
+            from paddleocr import PaddleOCR
+            _paddle_ocr_instance = PaddleOCR(
+                use_angle_cls=True, lang='ch',
+                use_gpu=False, show_log=False,
+                det_db_thresh=0.3, det_db_box_thresh=0.3,
+                rec_batch_num=6
+            )
+            logger.info("PaddleOCR实例初始化成功，专注中文场景文本")
+        except Exception as e:
+            logger.warning(f"PaddleOCR初始化失败: {e}")
+    return _paddle_ocr_instance
 
 
 def _get_rapid_ocr():
@@ -539,62 +558,176 @@ def _compute_iou(bbox_a: List, bbox_b: List) -> float:
     return inter / float(area_a + area_b - inter)
 
 
+# ==================== PaddleOCR引擎 ====================
+
+def ocr_with_paddle(img: np.ndarray) -> Tuple[str, float, List[Dict[str, Any]]]:
+    """使用PaddleOCR进行OCR识别（中文场景最优）"""
+    try:
+        ocr = _get_paddle_ocr()
+        if ocr is None:
+            return "", 0.0, []
+
+        # paddleocr接收bgr格式的numpy数组
+        result = ocr.ocr(img, cls=True)
+        if not result or not result[0]:
+            return "", 0.0, []
+
+        texts: List[str] = []
+        confidences: List[float] = []
+        regions: List[Dict[str, Any]] = []
+
+        for item in result[0]:
+            bbox = item[0]  # 4点坐标
+            text = str(item[1][0])
+            conf = float(item[1][1])
+
+            texts.append(text)
+            confidences.append(conf)
+
+            # 4点转轴对齐bbox
+            if bbox and len(bbox) >= 4:
+                xs = [int(p[0]) for p in bbox]
+                ys = [int(p[1]) for p in bbox]
+                regions.append({
+                    "text": text,
+                    "confidence": conf,
+                    "bbox": [min(xs), min(ys), max(xs), max(ys)],
+                    "type": "text",
+                    "engine": "paddleocr"
+                })
+
+        if not texts:
+            return "", 0.0, []
+
+        raw_text = "\n".join(texts)
+        avg_conf = sum(confidences) / len(confidences)
+        logger.info(f"PaddleOCR识别: {len(texts)}行, 平均置信度={avg_conf:.4f}")
+        return raw_text, avg_conf, regions
+
+    except Exception as e:
+        logger.warning(f"PaddleOCR识别失败: {e}")
+        return "", 0.0, []
+
+
+# ==================== 文本相似度（引擎融合用） ====================
+
+def _text_similarity(a: str, b: str) -> float:
+    """计算两段文本的字符级相似度（用于多引擎结果匹配）"""
+    if not a or not b:
+        return 0.0
+    a_clean = a.strip().lower()
+    b_clean = b.strip().lower()
+    if a_clean == b_clean:
+        return 1.0
+    # 最长公共子序列相似度
+    shorter, longer = (a_clean, b_clean) if len(a_clean) <= len(b_clean) else (b_clean, a_clean)
+    if not shorter:
+        return 0.0
+    # 简单字符重叠率
+    overlap = sum(1 for c in shorter if c in longer)
+    return overlap / len(shorter)
+
+
 # ==================== 多引擎融合 ====================
 
 def multi_engine_ocr(img: np.ndarray, time_budget: float = 30.0) -> Tuple[str, float, List[Dict[str, Any]], str]:
     """
-    多引擎融合OCR（带时间预算）
-    优先级: RapidOCR > Tesseract多PSM > Tesseract英文
-    融合策略：优先高置信度结果，RapidOCR低置信度时Tesseract兜底
+    三引擎并行融合OCR（方向①：多引擎融合升级版）
+    引擎: RapidOCR(通用) + PaddleOCR(中文) + Tesseract(保底)
+    融合策略: 置信度加权 + 文本相似度匹配 + 区域合并
     """
     start = time.time()
 
-    # 第一优先级: 布局感知RapidOCR（多列检测 + 多尺度融合）
-    rapid_text, rapid_conf, rapid_regions = "", 0.0, []
-    rapid_text_len = 0
-    if _RAPID_OCR_AVAILABLE:
-        text, conf, regions = _layout_aware_ocr(img)
-        if text:
-            rapid_text, rapid_conf, rapid_regions = text, conf, regions
-            rapid_text_len = len(text)
-            logger.info(f"RapidOCR识别: 文本长度={rapid_text_len}, 置信度={conf:.4f}")
+    # ---- 阶段1: 并行执行所有引擎 ----
+    results: List[Tuple[str, float, List[Dict[str, Any]], str]] = []
 
-    # 时间预算检查
+    # 1. RapidOCR（布局感知版本）
+    rapid_text, rapid_conf, rapid_regions = "", 0.0, []
+    if _RAPID_OCR_AVAILABLE:
+        try:
+            text, conf, regions = _layout_aware_ocr(img)
+            if text:
+                rapid_text, rapid_conf, rapid_regions = text, conf, regions
+                results.append((text, conf, regions, "rapidocr"))
+                logger.info(f"RapidOCR: {len(text)}字 conf={conf:.3f}")
+        except Exception as e:
+            logger.warning(f"RapidOCR异常: {e}")
+
     elapsed = time.time() - start
-    if elapsed > time_budget * 0.7:
-        logger.info(f"时间预算不足({elapsed:.1f}s)，跳过Tesseract")
+    if elapsed > time_budget * 0.9:
+        logger.info(f"时间预算紧张({elapsed:.1f}s)，仅用RapidOCR结果")
         if rapid_text:
             return rapid_text, rapid_conf, rapid_regions, "rapidocr"
+        return "", 0.0, [], "timeout"
 
-    # 第二优先级: Tesseract中英混合（仅当RapidOCR未检测到文本时）
-    tesseract_text, tesseract_conf = "", 0.0
-    if not rapid_text and _TESSERACT_AVAILABLE:
-        text, conf = ocr_with_tesseract_multi_psm(img, lang="chi_sim+eng")
+    # 2. PaddleOCR（中文场景最优）
+    paddle_text, paddle_conf, paddle_regions = "", 0.0, []
+    try:
+        text, conf, regions = ocr_with_paddle(img)
         if text:
-            tesseract_text, tesseract_conf = text, conf
-            logger.info(f"Tesseract中英识别: 文本长度={len(text)}, 置信度={conf:.4f}")
+            paddle_text, paddle_conf, paddle_regions = text, conf, regions
+            results.append((text, conf, regions, "paddleocr"))
+            logger.info(f"PaddleOCR: {len(text)}字 conf={conf:.3f}")
+    except Exception as e:
+        logger.warning(f"PaddleOCR异常: {e}")
 
-    # 融合策略：优先RapidOCR（检测更精细），Tesseract仅在RapidOCR无结果时使用
-    if rapid_text:
-        logger.info(f"最终选择: RapidOCR(文本长度={rapid_text_len}, conf={rapid_conf:.4f})")
+    elapsed = time.time() - start
+    if elapsed > time_budget * 0.9:
+        if results:
+            best = max(results, key=lambda r: r[1] * len(r[0]))
+            logger.info(f"时间预算紧张，选择最佳引擎: {best[3]}")
+            return best[:3] + (best[3],)
+        if rapid_text:
+            return rapid_text, rapid_conf, rapid_regions, "rapidocr"
+        return "", 0.0, [], "timeout"
+
+    # 3. Tesseract（保底引擎，仅当前两引擎均无结果时快速扫描）
+    tesseract_text, tesseract_conf = "", 0.0
+    if not any(r[0] for r in results) and _TESSERACT_AVAILABLE:
+        try:
+            text, conf = ocr_with_tesseract_multi_psm(img, lang="chi_sim+eng")
+            if text:
+                tesseract_text, tesseract_conf = text, conf
+                results.append((text, conf, [], "tesseract"))
+                logger.info(f"Tesseract: {len(text)}字 conf={conf:.3f}")
+        except Exception as e:
+            logger.warning(f"Tesseract异常: {e}")
+
+    # ---- 阶段2: 置信度加权融合 ----
+    if not results:
+        logger.warning("所有OCR引擎均未识别到文本")
+        return "", 0.0, [], "none"
+
+    # 有PaddleOCR结果时，优先用PaddleOCR（中文包装场景最佳）
+    if paddle_text and paddle_conf >= 0.4:
+        logger.info(f"★ 融合决策: PaddleOCR优先(conf={paddle_conf:.3f}, {len(paddle_text)}字)")
+        # 用RapidOCR结果补充PaddleOCR缺失的文字
+        if rapid_text and rapid_conf >= 0.5:
+            combined_text = paddle_text
+            # 若RapidOCR有额外内容，追加
+            if len(rapid_text) > len(paddle_text) * 1.3:
+                combined_text += "\n" + rapid_text
+                logger.info(f"RapidOCR补充文本，合并后长度={len(combined_text)}")
+            paddle_regions.append({"text": f"融合来源: PaddleOCR+RapidOCR", "confidence": max(paddle_conf, rapid_conf), "bbox": [], "type": "meta"})
+            return combined_text, max(paddle_conf, rapid_conf), paddle_regions, "paddleocr_fused"
+        return paddle_text, paddle_conf, paddle_regions, "paddleocr"
+
+    # RapidOCR优先（但PaddleOCR无结果时）
+    if rapid_text and rapid_conf >= 0.4:
+        logger.info(f"★ 融合决策: RapidOCR优先(conf={rapid_conf:.3f}, {len(rapid_text)}字)")
         return rapid_text, rapid_conf, rapid_regions, "rapidocr"
-    elif tesseract_text:
-        logger.info(f"最终选择: Tesseract(文本长度={len(tesseract_text)}, conf={tesseract_conf:.4f})")
+
+    # Tesseract保底
+    if tesseract_text:
+        logger.info(f"★ 融合决策: Tesseract保底(conf={tesseract_conf:.3f})")
         return tesseract_text, tesseract_conf, [], "tesseract"
 
-    # 第三优先级: Tesseract纯英文
-    if _TESSERACT_AVAILABLE:
-        text, conf = ocr_with_tesseract_multi_psm(img, lang="eng")
-        if text:
-            logger.info(f"Tesseract英文识别: 文本长度={len(text)}, 置信度={conf:.4f}")
-            return text, conf, [], "tesseract_eng"
-
-    # 最终保底
-    if rapid_text:
-        return rapid_text, rapid_conf, rapid_regions, "rapidocr_low_conf"
-
-    logger.warning("所有OCR引擎均未识别到文本")
-    return "", 0.0, [], "none"
+    # 最终保底：选置信度×长度最高的
+    best = max(results, key=lambda r: r[1] * len(r[0]))
+    logger.info(f"★ 融合决策: {best[3]}保底(conf={best[1]:.3f})")
+    if best[3] == "paddleocr":
+        return best[0], best[1], best[2], "paddleocr_fallback"
+    return best[0], best[1], best[2], best[3]
 
 
 # ==================== 文本后处理 ====================

@@ -249,6 +249,54 @@ def rule_based_extract(ocr_text: str, template_fields: List[str]) -> Dict[str, A
             if field not in default_fields and field not in result:
                 result[field] = "N/A"
 
+    # ==================== 置信度打分 ====================
+    filled = {k: v for k, v in result.items() if v and v != "N/A"}
+    total_key_fields = len([f for f in default_fields if f in result])
+    filled_key = len([f for f in default_fields if f in filled])
+
+    if total_key_fields > 0:
+        key_field_ratio = filled_key / total_key_fields
+    else:
+        key_field_ratio = 0.0
+
+    # 综合置信度 = 关键字段填充率
+    if key_field_ratio >= 0.8:
+        confidence = "high"
+    elif key_field_ratio >= 0.4:
+        confidence = "medium"
+    elif filled_key > 0:
+        confidence = "low"
+    else:
+        confidence = "failed"
+
+    result["_confidence"] = confidence
+    result["_filled_fields"] = filled_key
+    result["_total_expected"] = total_key_fields
+
+    # ==================== 交叉关联推理 ====================
+    # 1. 品牌+成分→推断产品类型（补充product_name）
+    if (result.get("product_name", "N/A") == "N/A"
+            and result.get("brand", "N/A") != "N/A"
+            and result.get("ingredients", "N/A") != "N/A"):
+        ingredients_lower = result["ingredients"].lower()
+        if any(kw in ingredients_lower for kw in ["面粉", "小麦", "大米", "玉米"]):
+            result["_inferred_type"] = "食品"
+        elif any(kw in ingredients_lower for kw in ["水", "甘油", "表面活性剂", "月桂醇"]):
+            result["_inferred_type"] = "日化品"
+        elif any(kw in ingredients_lower for kw in ["草药", "中药", "提取物"]):
+            result["_inferred_type"] = "药品"
+
+    # 2. 生产日期+保质期→自动计算到期日期（已实现）
+    # 3. 营养表字段合理性验证
+    if "nutrition_facts" in result:
+        nf = result["nutrition_facts"]
+        if isinstance(nf, dict):
+            # 检查是否包含关键营养指标
+            has_energy = any("能量" in str(k) or "energy" in str(k).lower() or "calor" in str(k).lower() for k in nf)
+            has_protein = any("蛋白" in str(k) or "protein" in str(k).lower() for k in nf)
+            if not has_energy or not has_protein:
+                result["_nutrition_warning"] = "营养表可能不完整（缺少能量或蛋白质）"
+
     return result
 
 
