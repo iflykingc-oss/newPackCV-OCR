@@ -26,6 +26,8 @@ for _path in [_src_path, _workspace]:
         sys.path.insert(0, _path)
 
 from utils.file.file import File
+from utils.im_platform import get_dispatcher
+from graphs.nodes.call_audit_node import AuditStore
 
 logging.basicConfig(level=logging.INFO, format='%(asctime)s - %(name)s - %(levelname)s - %(message)s')
 logger = logging.getLogger(__name__)
@@ -35,8 +37,8 @@ os.environ["COZE_WORKSPACE_PATH"] = os.path.dirname(os.path.dirname(os.path.absp
 
 app = FastAPI(
     title="PackCV-OCR API",
-    description="包装OCR识别与结构化信息提取服务\n支持通过API或飞书机器人回调调用",
-    version="3.5.0"
+    description="包装OCR识别与结构化信息提取服务\n支持API、飞书、钉钉、企业微信多平台接入\nV5.3: 多通道融合 + 品类模板 + 调用审计",
+    version="5.3.0"
 )
 
 app.add_middleware(
@@ -264,6 +266,11 @@ async def root():
         "endpoints": {
             "POST /api/ocr": "OCR识别（传入图片URL，返回结构化数据）",
             "POST /api/feishu/callback": "飞书事件回调（接收图片消息触发OCR）",
+            "POST /api/dingtalk/callback": "钉钉事件回调（接收消息触发OCR）",
+            "POST /api/wecom/callback": "企业微信事件回调（接收消息触发OCR）",
+            "POST /api/im/send": "通用IM消息Webhook推送",
+            "GET /api/admin/stats": "调用统计Dashboard",
+            "GET /metrics": "Prometheus指标端点",
             "GET /health": "健康检查"
         }
     }
@@ -369,6 +376,155 @@ def format_feishu_card_ack(text: str) -> Dict[str, Any]:
             }]
         }
     }
+
+
+# ==================== V5.3 三平台回调 & 监控 ====================
+
+class DingTalkEventRequest(BaseModel):
+    """钉钉事件回调请求"""
+    msgtype: Optional[str] = Field(default=None, description="消息类型")
+    text: Optional[Dict[str, Any]] = Field(default=None, description="文本内容")
+    senderId: Optional[str] = Field(default=None, description="发送者ID")
+    conversationId: Optional[str] = Field(default=None, description="会话ID")
+    conversationType: Optional[str] = Field(default=None, description="会话类型")
+    pictureUrl: Optional[str] = Field(default=None, description="图片URL")
+    encrypt: Optional[str] = Field(default=None, description="加密消息体")
+
+
+class WeComEventRequest(BaseModel):
+    """企业微信事件回调请求"""
+    msgtype: Optional[str] = Field(default=None, description="消息类型")
+    from_user: Optional[str] = Field(default=None, alias="from", description="发送者")
+    chat_id: Optional[str] = Field(default=None, description="会话ID")
+    chat_type: Optional[str] = Field(default=None, description="会话类型")
+    text: Optional[Dict[str, Any]] = Field(default=None, description="文本内容")
+    image: Optional[Dict[str, Any]] = Field(default=None, description="图片内容")
+    Encrypt: Optional[str] = Field(default=None, description="加密消息体")
+    echostr: Optional[str] = Field(default=None, description="验证串")
+    event: Optional[str] = Field(default=None, description="事件类型")
+
+    class Config:
+        populate_by_name = True
+
+
+def _handle_im_message(platform: str, body: str, image_url: str = "", text: str = "") -> Dict[str, Any]:
+    """统一处理三平台消息事件
+    1. 解析事件
+    2. 命令路由
+    3. 返回对应平台格式的响应
+    """
+    dispatcher = get_dispatcher()
+    adapter = dispatcher.get_adapter(platform)
+    if not adapter:
+        return {"error": f"未知平台: {platform}"}
+
+    # 1. 解析事件
+    event = adapter.parse_event(body)
+    if event.get("event_type") == "url_verification":
+        return {"challenge": event.get("challenge", "")}
+
+    # 2. 命令路由
+    extracted_text = text or adapter.extract_text_from_event(event)
+    parsed_cmd = dispatcher.parse_command(extracted_text)
+    image_from_event = ""
+    if event.get("message_type") == "image" and isinstance(event.get("content"), dict):
+        image_from_event = event["content"].get("image_url", "") or event["content"].get("image_key", "")
+
+    final_image_url = image_url or image_from_event
+
+    if parsed_cmd["is_command"] and parsed_cmd["known"]:
+        response = dispatcher.route_command(
+            parsed_cmd["command"],
+            parsed_cmd["args"],
+            image_url=final_image_url
+        )
+    elif event.get("message_type") == "image" and final_image_url:
+        # 直接发送图片，触发OCR
+        response = dispatcher.route_command("/ocr", "", image_url=final_image_url)
+    else:
+        response = dispatcher.route_command("/help", "")
+
+    return dispatcher.dispatch_to_platform(
+        platform, response["title"], response["content"], response.get("actions", [])
+    )
+
+
+@app.post("/api/dingtalk/callback")
+async def dingtalk_callback(request: Request):
+    """钉钉事件回调接口
+    配置方式：
+    1. 创建钉钉群机器人或应用机器人
+    2. 配置回调URL为本接口
+    3. 接收文本/图片消息 → 触发OCR → 返回结果卡片
+    """
+    body_bytes = await request.body()
+    body_str = body_bytes.decode("utf-8")
+    headers = {k.lower(): v for k, v in request.headers.items()}
+
+    dispatcher = get_dispatcher()
+    adapter = dispatcher.get_adapter("dingtalk")
+    if not adapter.verify_signature(headers, body_str):
+        raise HTTPException(status_code=401, detail="签名验证失败")
+
+    logger.info(f"钉钉事件: {body_str[:200]}")
+    return _handle_im_message("dingtalk", body_str)
+
+
+@app.post("/api/wecom/callback")
+async def wecom_callback(request: Request):
+    """企业微信事件回调接口
+    配置方式：
+    1. 创建企业微信智能机器人或自建应用
+    2. 配置回调URL为本接口
+    3. 接收消息 → 触发OCR → 返回结果
+    """
+    body_bytes = await request.body()
+    body_str = body_bytes.decode("utf-8")
+    headers = {k.lower(): v for k, v in request.headers.items()}
+
+    dispatcher = get_dispatcher()
+    adapter = dispatcher.get_adapter("wecom")
+    if not adapter.verify_signature(headers, body_str):
+        raise HTTPException(status_code=401, detail="签名验证失败")
+
+    logger.info(f"企微事件: {body_str[:200]}")
+    return _handle_im_message("wecom", body_str)
+
+
+@app.post("/api/im/send")
+async def im_send(platform: str, webhook_url: str, title: str, content: str, request: Request = None):
+    """通用IM消息推送接口（Webhook方式）
+    用法：
+    POST /api/im/send?platform=feishu&webhook_url=https://...&title=识别结果&content=...
+    """
+    dispatcher = get_dispatcher()
+    payload = dispatcher.dispatch_to_platform(platform, title, content)
+    adapter = dispatcher.get_adapter(platform)
+    if not adapter:
+        raise HTTPException(status_code=400, detail=f"未知平台: {platform}")
+    result = adapter.send_webhook(webhook_url, payload)
+    return result
+
+
+@app.get("/api/admin/stats")
+async def get_stats():
+    """调用统计Dashboard接口 - 滑动窗口统计"""
+    store = AuditStore.get_instance()
+    return {
+        "stats": store.get_stats(),
+        "recent_calls": store.get_recent(20)
+    }
+
+
+@app.get("/metrics")
+async def prometheus_metrics():
+    """Prometheus指标端点 - 文本格式"""
+    from fastapi.responses import PlainTextResponse
+    store = AuditStore.get_instance()
+    return PlainTextResponse(
+        content=store.to_prometheus(),
+        media_type="text/plain; version=0.0.4"
+    )
 
 
 # ==================== 启动入口 ====================

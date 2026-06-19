@@ -72,6 +72,35 @@ class GlobalState(BaseModel):
     inferred_fields: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="知识推理补充字段")
     validation_results: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="知识推理验证结果")
     inferred_product_type: Optional[str] = Field(default="", description="知识推理推断的产品类型")
+
+    # V5.3 多通道融合
+    fused_structured_data: Optional[Dict[str, Any]] = Field(default_factory=dict, description="多通道融合后的结构化数据")
+    fused_confidence: Optional[float] = Field(default=0.0, description="多通道融合置信度")
+    fusion_field_count: Optional[int] = Field(default=0, description="参与融合的字段数")
+    fusion_consensus_count: Optional[int] = Field(default=0, description="一致字段数")
+    fusion_conflict_count: Optional[int] = Field(default=0, description="冲突字段数")
+    fusion_decisions: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="字段级融合决策")
+    enable_multi_channel_fusion: Optional[bool] = Field(default=True, description="是否启用多通道融合")
+
+    # V5.3 品类模板
+    detected_category: Optional[str] = Field(default="", description="检测到的产品品类")
+    category_template: Optional[str] = Field(default="", description="使用的模板名")
+    field_coverage: Optional[float] = Field(default=0.0, description="必填字段覆盖率")
+    missing_required_fields: Optional[List[str]] = Field(default_factory=list, description="缺失的必填字段")
+    completion_suggestions: Optional[List[Dict[str, str]]] = Field(default_factory=list, description="补全建议")
+    enable_category_template: Optional[bool] = Field(default=True, description="是否启用品类模板")
+
+    # V5.3 多语言OCR
+    detected_language: Optional[str] = Field(default="", description="检测到的语言")
+    multi_lang_regions: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="多语言识别区域")
+    enable_multi_language: Optional[bool] = Field(default=False, description="是否启用多语言OCR")
+
+    # V5.3 调用审计
+    request_id: Optional[str] = Field(default="", description="请求ID")
+    caller: Optional[str] = Field(default="", description="调用方（feishu/dingtalk/wecom/api）")
+    audit_id: Optional[str] = Field(default="", description="审计记录ID")
+    node_metrics: Optional[Dict[str, float]] = Field(default_factory=dict, description="节点级耗时指标")
+    enable_audit: Optional[bool] = Field(default=True, description="是否启用调用审计")
     
     # 输出数据
     final_result: Dict[str, Any] = Field(default_factory=dict, description="最终输出结果")
@@ -80,6 +109,78 @@ class GlobalState(BaseModel):
     platform_push_result: Optional[Dict[str, Any]] = Field(default_factory=dict, description="平台推送结果")
     success: bool = Field(default=True, description="是否成功")
     error_message: Optional[str] = Field(default=None, description="错误信息")
+
+
+# ==================== V5.3 深度优化 - 节点I/O ====================
+
+# --- 多通道融合节点（V5.3新增）---
+
+class MultiChannelFusionInput(BaseModel):
+    """多通道融合节点输入"""
+    structured_data: Dict[str, Any] = Field(default_factory=dict, description="OCR传统管线的结构化结果（来自model_extract）")
+    vl_extracted_data: Dict[str, Any] = Field(default_factory=dict, description="VL多模态的结构化结果（来自vl_packaging_understanding）")
+    ocr_confidence: Optional[float] = Field(default=0.7, description="OCR通道整体置信度")
+    vl_confidence: Optional[float] = Field(default=0.7, description="VL通道整体置信度")
+    fusion_method: str = Field(default="weighted_score", description="融合方法：weighted_score/consensus/voting")
+
+
+class MultiChannelFusionOutput(BaseModel):
+    """多通道融合节点输出"""
+    fused_structured_data: Dict[str, Any] = Field(default_factory=dict, description="融合后的结构化数据")
+    fused_confidence: float = Field(default=0.0, description="融合后的整体置信度")
+    fusion_field_count: int = Field(default=0, description="参与融合的字段数")
+    fusion_consensus_count: int = Field(default=0, description="两通道一致字段数")
+    fusion_conflict_count: int = Field(default=0, description="两通道冲突字段数")
+    fusion_decisions: List[Dict[str, Any]] = Field(default_factory=list, description="字段级融合决策")
+    fusion_method: str = Field(default="weighted_score", description="使用的融合方法")
+
+
+# --- 品类模板库节点（V5.3新增）---
+
+class CategoryTemplateInput(BaseModel):
+    """品类模板应用节点输入"""
+    fused_structured_data: Dict[str, Any] = Field(default_factory=dict, description="融合后的结构化数据（来自multi_channel_fusion）")
+    raw_text: str = Field(default="", description="OCR原始文本")
+    product_type_hint: str = Field(default="", description="产品类型提示（可选）")
+    detected_category: str = Field(default="", description="上游已检测的品类（可选）")
+
+
+class CategoryTemplateOutput(BaseModel):
+    """品类模板应用节点输出"""
+    detected_category: str = Field(default="其他", description="检测到的产品品类")
+    template_name: str = Field(default="其他", description="使用的模板名")
+    required_fields: List[str] = Field(default_factory=list, description="品类必填字段")
+    optional_fields: List[str] = Field(default_factory=list, description="品类可选字段")
+    missing_required_fields: List[str] = Field(default_factory=list, description="缺失的必填字段")
+    missing_optional_fields: List[str] = Field(default_factory=list, description="缺失的可选字段")
+    field_coverage: float = Field(default=0.0, description="必填字段覆盖率（0-1）")
+    field_validation: Dict[str, Any] = Field(default_factory=dict, description="字段级验证结果")
+    completion_suggestions: List[Dict[str, str]] = Field(default_factory=list, description="补全建议")
+    reordered_data: Dict[str, Any] = Field(default_factory=dict, description="按优先级重排后的数据")
+
+
+# --- 调用审计节点（V5.3新增）---
+
+class CallAuditInput(BaseModel):
+    """调用审计节点输入"""
+    request_id: str = Field(default="", description="请求ID")
+    caller: str = Field(default="", description="调用方")
+    image_url: str = Field(default="", description="处理的图片URL（兼容字段）")
+    image_hash: str = Field(default="", description="图片内容哈希")
+    start_time: float = Field(default=0.0, description="开始时间（Unix时间戳）")
+    success: bool = Field(default=True, description="调用是否成功")
+    error_message: str = Field(default="", description="错误信息")
+    node_metrics: Dict[str, float] = Field(default_factory=dict, description="节点级耗时指标")
+    audit_log_payload: Dict[str, Any] = Field(default_factory=dict, description="额外审计上下文")
+
+
+class CallAuditOutput(BaseModel):
+    """调用审计节点输出"""
+    audit_id: str = Field(default="", description="审计记录ID")
+    audit_log: Dict[str, Any] = Field(default_factory=dict, description="审计日志")
+    total_duration: float = Field(default=0.0, description="总耗时（秒）")
+    success_rate_window: float = Field(default=1.0, description="窗口成功率（最近100次）")
+    avg_duration_window: float = Field(default=0.0, description="窗口平均耗时（最近100次）")
 
 
 # ==================== 图出入参 ====================

@@ -1,9 +1,49 @@
 # PackCV-OCR 项目结构索引
 
 ## 项目概述
-- **名称**: PackCV-OCR V5.1
+- **名称**: PackCV-OCR V5.3
 - **功能**: 面向货架/包装场景的高精度OCR识别解决方案 (全品类通用)
-- **核心升级**: RapidOCR(ONNX)主引擎 + 自适应5策略预处理 + 多尺度检测 + 布局感知KV提取 + LLM后验证 + 全品类自由格式提取 + 专线营养表提取 + 投影法布局分析 + 小字超分增强 + 飞书机器人 + HTTP API服务 + **多引擎融合(PaddleOCR)** + **透视校正** + **置信度评分**
+- **核心升级**: V5.3 = V5.2 + **多通道融合架构** + **品类模板库** + **调用审计中间件** + **多语言OCR接入** + **IM Platform Adapter（飞书/钉钉/企微）**
+
+### V5.3 产品力深度迭代 + 三平台发布（2026-06-19）
+
+#### 阶段一：产品力4方向深化
+
+| 优化方向 | 实现内容 | 变更文件 | 状态 |
+|---------|---------|---------|------|
+| ①多通道融合架构 | OCR传统管线 ∥ VL多模态 → 字段级加权融合（field_confidence≥0.8 优先，0.6-0.8 加权投票，<0.6 仅参考） | `multi_channel_fusion_node.py` | ✅ |
+| ②品类模板库 | 食品/药品/日化/酒类/电子 5大品类 → 字段权重+专有正则+关联校验 | `category_template_node.py` | ✅ |
+| ④调用审计中间件 | 内存LRU 1000条 + JSONL文件 + Prometheus `/metrics` + `/audit/summary` | `call_audit_node.py` | ✅ |
+| ⑤多语言OCR接入 | 中/英/日/韩/法/德/西 7语种支持（独立节点，按需挂载） | `multi_language_ocr_node.py` | ✅ |
+
+#### 阶段二：三平台发布（IM Platform Adapter）
+
+| 平台 | 实现方式 | 关键能力 | 端点 |
+|------|---------|---------|------|
+| 飞书 | 命令式Bot + 事件订阅 | AES-256-CBC签名验证、交互式卡片 | `POST /bot/feishu/events` |
+| 钉钉 | 自定义机器人 | HMAC-SHA256签名、markdown/actionCard | `POST /bot/dingtalk/callback` |
+| 企业微信 | 智能机器人 | SHA1+AEAD加密、text/markdown/news | `POST /bot/wecom/callback` |
+
+### V5.3 处理流程
+```
+image_preprocess → ocr_recognize → correct_text → model_extract 
+    → multi_channel_fusion (①融合传统OCR+VL多模态)
+    → vl_packaging_understanding (并行: VL多模态端到端理解)
+    → knowledge_inference (⑦知识推理)
+    → category_template (②品类模板应用)
+    → qa_answer → result_output → call_audit (④审计) → feishu_notify → END
+```
+
+### V5.3 IM Platform Adapter 架构
+```
+utils/im_platform/
+├── base.py              # PlatformMessage/PlatformType抽象
+├── feishu_bot.py        # 飞书加密签名+卡片消息
+├── dingtalk_bot.py      # 钉钉HMAC-SHA256+markdown
+├── wecom_bot.py         # 企微SHA1+AEAD
+├── dispatcher.py        # 统一消息解析/分发
+└── __init__.py
+```
 
 ### V5.2 深度优化（2026-06-19）
 以下为此前确认的四方向进一步推进：
@@ -118,3 +158,34 @@ image_preprocess → ocr_recognize → correct_text → model_extract
 |-----|------|------|
 | 多引擎对比评测 | PackCV vs Tesseract 批量测试 | `scripts/final_evaluation.py` |
 | 图片上传 | 包装图上架到对象存储 | `scripts/upload_images.py` |
+
+### V5.3 新增节点清单
+
+| 节点名 | 文件位置 | 类型 | 功能描述 | 分支逻辑 | 配置文件 |
+|-------|---------|------|---------|---------|---------|
+| multi_channel_fusion | `nodes/multi_channel_fusion_node.py` | task | **多通道字段融合**：传统OCR管线 + VL多模态两条通道结果 → 字段级置信度加权（≥0.8优先、0.6-0.8投票、<0.6参考） | - | - |
+| category_template | `nodes/category_template_node.py` | agent | **品类模板应用**：根据识别文本判断品类（食品/药品/日化/酒类/电子）→ 应用对应模板（字段权重+专有正则+关联校验） | - | `config/category_template_llm_cfg.json` |
+| call_audit | `nodes/call_audit_node.py` | task | **调用审计**：记录每次调用（image_hash/request_id/duration）→ 内存LRU+JSONL文件 → 暴露 `/metrics`+`/audit/summary` | - | - |
+| multi_language_ocr | `nodes/multi_language_ocr_node.py` | task | **多语言OCR**：中/英/日/韩/法/德/西 7语种包装识别（独立节点，按需挂载） | - | - |
+
+### V5.3 新增IM平台适配
+
+| 模块 | 文件位置 | 功能 |
+|------|---------|------|
+| IMPlatform抽象 | `utils/im_platform/base.py` | `PlatformMessage`/`PlatformType`统一抽象 |
+| 飞书Bot | `utils/im_platform/feishu_bot.py` | AES-256-CBC加密签名 + 交互式卡片 |
+| 钉钉Bot | `utils/im_platform/dingtalk_bot.py` | HMAC-SHA256签名 + markdown/actionCard |
+| 企微Bot | `utils/im_platform/wecom_bot.py` | SHA1+AEAD加密 + text/markdown/news |
+| BotDispatcher | `utils/im_platform/dispatcher.py` | 统一消息解析/分发/主动推送 |
+
+### 接入文档
+- 三平台发布指南：`docs/INTEGRATION.md`（含完整回调流程、签名原理、限流建议、上线Checklist）
+
+### 端点
+| 端点 | 用途 |
+|------|------|
+| `POST /bot/feishu/events` | 飞书事件订阅回调 |
+| `POST /bot/dingtalk/callback` | 钉钉机器人回调 |
+| `POST /bot/wecom/callback` | 企业微信智能机器人回调 |
+| `GET /audit/summary` | 审计Dashboard数据查询 |
+| `GET /metrics` | Prometheus 指标 |
