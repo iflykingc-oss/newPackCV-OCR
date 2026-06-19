@@ -1,0 +1,437 @@
+{
+  "total": 35,
+  "success": 35,
+  "error": 0,
+  "avg_rate": 54.7,
+  "median_rate": 38.5,
+  "avg_time_s": 20.0,
+  "scenarios": {
+    "原始清晰": {
+      "count": 2,
+      "avg_rate": 69.2
+    },
+    "模糊": {
+      "count": 10,
+      "avg_rate": 56.5
+    },
+    "暗光": {
+      "count": 4,
+      "avg_rate": 69.2
+    },
+    "过曝": {
+      "count": 2,
+      "avg_rate": 55.6
+    },
+    "噪点": {
+      "count": 4,
+      "avg_rate": 55.6
+    },
+    "倾斜": {
+      "count": 4,
+      "avg_rate": 60.1
+    },
+    "透视": {
+      "count": 2,
+      "avg_rate": 0.0
+    },
+    "遮挡": {
+      "count": 1,
+      "avg_rate": 81.8
+    },
+    "小字": {
+      "count": 4,
+      "avg_rate": 57.9
+    },
+    "组合": {
+      "count": 2,
+      "avg_rate": 23.8
+    }
+  },
+  "results": [
+    {
+      "case": "紫薯雪饼-原始_清晰",
+      "status": "ok",
+      "t": 62.53,
+      "fcnt": 15,
+      "ncnt": 0,
+      "tcnt": 15,
+      "rate": 100.0,
+      "raw_len": 437,
+      "error": ""
+    },
+    {
+      "case": "紫薯雪饼-轻度模糊_r=2",
+      "status": "ok",
+      "t": 46.76,
+      "fcnt": 16,
+      "ncnt": 0,
+      "tcnt": 16,
+      "rate": 100.0,
+      "raw_len": 430,
+      "error": ""
+    },
+    {
+      "case": "紫薯雪饼-中度模糊_r=4",
+      "status": "ok",
+      "t": 26.34,
+      "fcnt": 2,
+      "ncnt": 0,
+      "tcnt": 2,
+      "rate": 100.0,
+      "raw_len": 163,
+      "error": ""
+    },
+    {
+      "case": "紫薯雪饼-重度模糊_r=6",
+      "status": "ok",
+      "t": 18.21,
+      "fcnt": 2,
+      "ncnt": 0,
+      "tcnt": 2,
+      "rate": 100.0,
+      "raw_len": 20,
+      "error": ""
+    },
+    {
+      "case": "紫薯雪饼-暗光_x0.6",
+      "status": "ok",
+      "t": 53.25,
+      "fcnt": 14,
+      "ncnt": 0,
+      "tcnt": 14,
+      "rate": 100.0,
+      "raw_len": 446,
+      "error": ""
+    },
+    {
+      "case": "紫薯雪饼-暗光_x0.3",
+      "status": "ok",
+      "t": 56.46,
+      "fcnt": 12,
+      "ncnt": 0,
+      "tcnt": 12,
+      "rate": 100.0,
+      "raw_len": 328,
+      "error": ""
+    },
+    {
+      "case": "紫薯雪饼-过曝_x1.6",
+      "status": "ok",
+      "t": 45.41,
+      "fcnt": 8,
+      "ncnt": 3,
+      "tcnt": 11,
+      "rate": 72.7,
+      "raw_len": 453,
+      "error": ""
+    },
+    {
+      "case": "紫薯雪饼-轻度噪点_2%",
+      "status": "ok",
+      "t": 32.7,
+      "fcnt": 8,
+      "ncnt": 3,
+      "tcnt": 11,
+      "rate": 72.7,
+      "raw_len": 426,
+      "error": ""
+    },
+    {
+      "case": "紫薯雪饼-重度噪点_5%",
+      "status": "ok",
+      "t": 22.33,
+      "fcnt": 8,
+      "ncnt": 3,
+      "tcnt": 11,
+      "rate": 72.7,
+      "raw_len": 414,
+      "error": ""
+    },
+    {
+      "case": "紫薯雪饼-倾斜10度",
+      "status": "ok",
+      "t": 22.48,
+      "fcnt": 9,
+      "ncnt": 2,
+      "tcnt": 11,
+      "rate": 81.8,
+      "raw_len": 432,
+      "error": ""
+    },
+    {
+      "case": "紫薯雪饼-倾斜25度",
+      "status": "ok",
+      "t": 24.34,
+      "fcnt": 9,
+      "ncnt": 2,
+      "tcnt": 11,
+      "rate": 81.8,
+      "raw_len": 438,
+      "error": ""
+    },
+    {
+      "case": "紫薯雪饼-透视20%",
+      "status": "ok",
+      "t": 14.85,
+      "fcnt": 0,
+      "ncnt": 11,
+      "tcnt": 11,
+      "rate": 0.0,
+      "raw_len": 0,
+      "error": ""
+    },
+    {
+      "case": "紫薯雪饼-遮挡20%",
+      "status": "ok",
+      "t": 18.5,
+      "fcnt": 9,
+      "ncnt": 2,
+      "tcnt": 11,
+      "rate": 81.8,
+      "raw_len": 436,
+      "error": ""
+    },
+    {
+      "case": "紫薯雪饼-小字0.5x",
+      "status": "ok",
+      "t": 17.16,
+      "fcnt": 8,
+      "ncnt": 3,
+      "tcnt": 11,
+      "rate": 72.7,
+      "raw_len": 438,
+      "error": ""
+    },
+    {
+      "case": "紫薯雪饼-小字0.3x",
+      "status": "ok",
+      "t": 8.89,
+      "fcnt": 9,
+      "ncnt": 2,
+      "tcnt": 11,
+      "rate": 81.8,
+      "raw_len": 430,
+      "error": ""
+    },
+    {
+      "case": "紫薯雪饼-暗光+模糊",
+      "status": "ok",
+      "t": 13.57,
+      "fcnt": 0,
+      "ncnt": 11,
+      "tcnt": 11,
+      "rate": 0.0,
+      "raw_len": 61,
+      "error": ""
+    },
+    {
+      "case": "紫薯雪饼-模糊+倾斜",
+      "status": "ok",
+      "t": 22.07,
+      "fcnt": 8,
+      "ncnt": 3,
+      "tcnt": 11,
+      "rate": 72.7,
+      "raw_len": 409,
+      "error": ""
+    },
+    {
+      "case": "紫薯雪饼-全退化",
+      "status": "ok",
+      "t": 13.73,
+      "fcnt": 1,
+      "ncnt": 10,
+      "tcnt": 11,
+      "rate": 9.1,
+      "raw_len": 31,
+      "error": ""
+    },
+    {
+      "case": "答菲湿巾-原始_清晰",
+      "status": "ok",
+      "t": 5.06,
+      "fcnt": 5,
+      "ncnt": 8,
+      "tcnt": 13,
+      "rate": 38.5,
+      "raw_len": 118,
+      "error": ""
+    },
+    {
+      "case": "答菲湿巾-轻度模糊_r=2",
+      "status": "ok",
+      "t": 6.83,
+      "fcnt": 5,
+      "ncnt": 8,
+      "tcnt": 13,
+      "rate": 38.5,
+      "raw_len": 109,
+      "error": ""
+    },
+    {
+      "case": "答菲湿巾-中度模糊_r=4",
+      "status": "ok",
+      "t": 6.34,
+      "fcnt": 5,
+      "ncnt": 8,
+      "tcnt": 13,
+      "rate": 38.5,
+      "raw_len": 79,
+      "error": ""
+    },
+    {
+      "case": "答菲湿巾-重度模糊_r=6",
+      "status": "ok",
+      "t": 6.89,
+      "fcnt": 5,
+      "ncnt": 8,
+      "tcnt": 13,
+      "rate": 38.5,
+      "raw_len": 36,
+      "error": ""
+    },
+    {
+      "case": "答菲湿巾-暗光_x0.6",
+      "status": "ok",
+      "t": 6.21,
+      "fcnt": 5,
+      "ncnt": 8,
+      "tcnt": 13,
+      "rate": 38.5,
+      "raw_len": 114,
+      "error": ""
+    },
+    {
+      "case": "答菲湿巾-暗光_x0.3",
+      "status": "ok",
+      "t": 16.05,
+      "fcnt": 5,
+      "ncnt": 8,
+      "tcnt": 13,
+      "rate": 38.5,
+      "raw_len": 105,
+      "error": ""
+    },
+    {
+      "case": "答菲湿巾-过曝_x1.6",
+      "status": "ok",
+      "t": 10.46,
+      "fcnt": 5,
+      "ncnt": 8,
+      "tcnt": 13,
+      "rate": 38.5,
+      "raw_len": 111,
+      "error": ""
+    },
+    {
+      "case": "答菲湿巾-轻度噪点_2%",
+      "status": "ok",
+      "t": 10.19,
+      "fcnt": 5,
+      "ncnt": 8,
+      "tcnt": 13,
+      "rate": 38.5,
+      "raw_len": 105,
+      "error": ""
+    },
+    {
+      "case": "答菲湿巾-重度噪点_5%",
+      "status": "ok",
+      "t": 10.32,
+      "fcnt": 5,
+      "ncnt": 8,
+      "tcnt": 13,
+      "rate": 38.5,
+      "raw_len": 108,
+      "error": ""
+    },
+    {
+      "case": "答菲湿巾-倾斜10度",
+      "status": "ok",
+      "t": 12.72,
+      "fcnt": 5,
+      "ncnt": 8,
+      "tcnt": 13,
+      "rate": 38.5,
+      "raw_len": 111,
+      "error": ""
+    },
+    {
+      "case": "答菲湿巾-倾斜25度",
+      "status": "ok",
+      "t": 15.15,
+      "fcnt": 5,
+      "ncnt": 8,
+      "tcnt": 13,
+      "rate": 38.5,
+      "raw_len": 117,
+      "error": ""
+    },
+    {
+      "case": "答菲湿巾-透视20%",
+      "status": "ok",
+      "t": 29.37,
+      "fcnt": 0,
+      "ncnt": 11,
+      "tcnt": 11,
+      "rate": 0.0,
+      "raw_len": 0,
+      "error": ""
+    },
+    {
+      "case": "答菲湿巾-小字0.5x",
+      "status": "ok",
+      "t": 5.56,
+      "fcnt": 5,
+      "ncnt": 8,
+      "tcnt": 13,
+      "rate": 38.5,
+      "raw_len": 117,
+      "error": ""
+    },
+    {
+      "case": "答菲湿巾-小字0.3x",
+      "status": "ok",
+      "t": 5.75,
+      "fcnt": 5,
+      "ncnt": 8,
+      "tcnt": 13,
+      "rate": 38.5,
+      "raw_len": 110,
+      "error": ""
+    },
+    {
+      "case": "答菲湿巾-暗光+模糊",
+      "status": "ok",
+      "t": 14.08,
+      "fcnt": 5,
+      "ncnt": 8,
+      "tcnt": 13,
+      "rate": 38.5,
+      "raw_len": 42,
+      "error": ""
+    },
+    {
+      "case": "答菲湿巾-模糊+倾斜",
+      "status": "ok",
+      "t": 10.08,
+      "fcnt": 5,
+      "ncnt": 8,
+      "tcnt": 13,
+      "rate": 38.5,
+      "raw_len": 101,
+      "error": ""
+    },
+    {
+      "case": "答菲湿巾-全退化",
+      "status": "ok",
+      "t": 9.4,
+      "fcnt": 5,
+      "ncnt": 8,
+      "tcnt": 13,
+      "rate": 38.5,
+      "raw_len": 43,
+      "error": ""
+    }
+  ]
+}
