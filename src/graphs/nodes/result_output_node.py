@@ -116,6 +116,14 @@ def result_output_node(
         "structured_data": state.structured_data or {},
     }
 
+    # V5.4 商业化统一结构：附加 category_info / warnings / ext_info
+    if state.category_info:
+        output_data["category_info"] = state.category_info
+    if state.warnings:
+        output_data["warnings"] = state.warnings
+    if state.ext_info:
+        output_data["ext_info"] = state.ext_info
+
     if state.corrected_text:
         output_data["corrected_text"] = state.corrected_text
     elif state.corrected_result:

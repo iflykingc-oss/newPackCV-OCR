@@ -797,13 +797,55 @@ def model_extract_node(
         if confidence < 0.9 and structured_data:
             structured_data = _llm_post_correct(structured_data, ocr_text, ctx, llm_config)
 
-        # 提取产品类型
+        # V5.4 商业化统一结构解析：提取嵌套字段，扁平化处理
+        # 1) 提取 product_type（顶层）
         product_type = structured_data.pop("product_type", "") if isinstance(structured_data, dict) else ""
 
-        logger.info(f"结构化提取完成，置信度: {confidence:.2f}, 产品类型: {product_type or '未知'}, 布局感知字段: {list(layout_data.keys())}")
+        # 2) 提取 category_info（保持原始嵌套）
+        category_info = structured_data.pop("category_info", {}) if isinstance(structured_data, dict) else {}
+        if not isinstance(category_info, dict):
+            category_info = {}
+
+        # 3) 提取 warnings / ext_info（新结构字段）
+        warnings = structured_data.pop("warnings", []) if isinstance(structured_data, dict) else []
+        if not isinstance(warnings, list):
+            warnings = []
+        ext_info = structured_data.pop("ext_info", []) if isinstance(structured_data, dict) else []
+        if not isinstance(ext_info, list):
+            ext_info = []
+
+        # 4) 兼容旧规则引擎数据：如果structured_data里没有category_info且都是顶层字段，
+        #    视为旧版数据，直接当顶层使用
+        #    如果有category_info，将其字段扁平化到structured_data顶层（供下游融合使用）
+        if category_info:
+            # 检查是否有字段冲突（同一字段同时在顶层和category_info）
+            for k, v in category_info.items():
+                if k not in structured_data or structured_data.get(k) is None:
+                    structured_data[k] = v
+                # 顶层已有值则保留顶层值
+
+        # 计算统一字段覆盖率（V5.4：基于9个标准字段）
+        standard_fields = ["brand", "product_name", "specification", "manufacturer",
+                           "production_date", "shelf_life", "batch_number"]
+        filled_standard = sum(1 for f in standard_fields if structured_data.get(f))
+        if product_type and product_type != "其他":
+            filled_standard += 1
+        if warnings:
+            filled_standard += 1
+        if category_info:
+            filled_standard += min(len(category_info), 2)  # 品类字段最多算2个
+        confidence = min(0.99, 0.5 + filled_standard * 0.05)
+
+        logger.info(
+            f"结构化提取完成，置信度: {confidence:.2f}, 产品类型: {product_type or '未知'}, "
+            f"category_info字段: {list(category_info.keys())}, warnings: {len(warnings)}, ext_info: {len(ext_info)}"
+        )
 
         return ModelExtractOutput(
             structured_data=structured_data,
+            category_info=category_info,
+            warnings=warnings,
+            ext_info=ext_info,
             confidence=confidence,
             missing_fields=missing_fields,
             product_type=product_type
@@ -816,9 +858,14 @@ def model_extract_node(
         rule_confidence = filled_count / len(rule_data) if rule_data else 0.3
 
         logger.info(f"规则引擎提取完成: {json.dumps(rule_data, ensure_ascii=False)}, 置信度: {rule_confidence:.2f}")
+        # 提取产品类型
+        product_type = rule_data.pop("product_type", "") if isinstance(rule_data, dict) else ""
         return ModelExtractOutput(
             structured_data=rule_data,
+            category_info={},
+            warnings=[],
+            ext_info=[],
             confidence=rule_confidence,
             missing_fields=[f for f in rule_data if rule_data[f] == "N/A"],
-            product_type=""
+            product_type=product_type
         )

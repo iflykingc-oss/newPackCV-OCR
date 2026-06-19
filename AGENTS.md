@@ -1,9 +1,9 @@
 # PackCV-OCR 项目结构索引
 
 ## 项目概述
-- **名称**: PackCV-OCR V5.3
-- **功能**: 面向货架/包装场景的高精度OCR识别解决方案 (全品类通用)
-- **核心升级**: V5.3 = V5.2 + **多通道融合架构** + **品类模板库** + **调用审计中间件** + **多语言OCR接入** + **IM Platform Adapter（飞书/钉钉/企微）**
+- **名称**: PackCV-OCR V5.4 (Commercial-Ready)
+- **功能**: 面向货架/包装场景的高精度OCR识别解决方案 (全品类通用 · 商业化版)
+- **核心升级**: V5.4 = V5.3 + **结构化提取全量替换为商业化统一结构** (product_type/brand/.../category_info 顶层+品类对象双层结构)
 
 ### V5.3 产品力深度迭代 + 三平台发布（2026-06-19）
 
@@ -189,3 +189,52 @@ image_preprocess → ocr_recognize → correct_text → model_extract
 | `POST /bot/wecom/callback` | 企业微信智能机器人回调 |
 | `GET /audit/summary` | 审计Dashboard数据查询 |
 | `GET /metrics` | Prometheus 指标 |
+### V5.4 商业化统一结构（2026-06-19）
+
+#### 目标
+为商业化推广铺路，统一结构化提取输出格式，提升下游消费方的可解析性。
+
+#### 核心改动
+| 文件 | 改动 |
+|-----|------|
+| `config/model_extract_llm_cfg.json` | SP/UP全量替换为商业化统一结构（product_type/brand/product_name/specification/manufacturer/production_date/shelf_life/batch_number/warnings + category_info + ext_info），增加3个few-shot示例（食品/日化/发票）|
+| `config/vl_packaging_llm_cfg.json` | SP/UP同步改造为新结构 |
+| `src/graphs/nodes/model_extract_node.py` | 解析新结构：pop出product_type/category_info/warnings/ext_info，category_info.*扁平化到顶层（向下游融合兼容）|
+| `src/graphs/nodes/vl_packaging_understanding_node.py` | 同步：扁平化category_info + 计算vl_confidence |
+| `src/graphs/nodes/result_output_node.py` | 输出data新增category_info/warnings/ext_info字段 |
+| `src/graphs/state.py` | `ModelExtractOutput`新增4字段（category_info/warnings/ext_info/missing_fields），`GlobalState`同步新增3字段，`ResultOutputInput`同步 |
+
+#### 商业化统一输出Schema
+```json
+{
+  "product_type": "食品/饮料/日化清洁/个人护理/药品/电子产品/其他",
+  "brand": "品牌名称",
+  "product_name": "产品全称",
+  "specification": "规格/净含量/型号",
+  "manufacturer": "生产商/出品方",
+  "production_date": "YYYY-MM-DD / YYYY-MM / 原文",
+  "shelf_life": "保质期/有效期",
+  "batch_number": "生产批号/批次号",
+  "warnings": ["注意事项数组"],
+  "category_info": {
+    "ingredients": ["配料表"],
+    "nutrition_info": ["营养成分"],
+    "features": ["产品卖点"],
+    "license_number": "许可证号",
+    "standard": "执行标准",
+    "storage_condition": "贮存条件",
+    "usage_method": "使用方法"
+  },
+  "ext_info": ["非标信息数组"]
+}
+```
+
+#### 兼容性保障
+- `category_info.*` 扁平化到 `structured_data` 顶层，向下游 `multi_channel_fusion` / `category_template` / `call_audit` 节点保持完全兼容
+- 多产品场景由UP明确支持（最外层数组）
+- "其他"品类兜底机制：所有非商品场景（如发票）正确归类为"其他"并放入 category_info
+
+#### 验证
+- ✅ test_run 端到端通过（发票测试图：product_type="其他"，21个字段全部正确提取）
+- ✅ 7个文件py_compile通过
+- ✅ 下游节点零改动兼容

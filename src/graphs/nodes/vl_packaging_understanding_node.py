@@ -88,9 +88,28 @@ def vl_packaging_understanding_node(
         else:
             parsed = {"raw_extraction": result_text}
 
+        # V5.4 商业化统一结构解析：扁平化 category_info 供下游融合使用
+        if isinstance(parsed, dict):
+            category_info = parsed.pop("category_info", {})
+            if not isinstance(category_info, dict):
+                category_info = {}
+            # 扁平化：把 category_info 的字段提升到顶层（如果顶层没有）
+            for k, v in category_info.items():
+                if k not in parsed or parsed.get(k) is None:
+                    parsed[k] = v
+        else:
+            category_info = {}
+
+        # 计算VL置信度（基于顶层标准字段填充率）
+        standard_fields = ["product_type", "brand", "product_name", "specification",
+                           "manufacturer", "production_date", "shelf_life"]
+        filled = sum(1 for f in standard_fields if parsed.get(f))
+        vl_confidence = min(0.95, 0.5 + filled * 0.06)
+
         return VLPackagingOutput(
             vl_extracted_data=parsed,
             vl_raw_response=result_text,
+            vl_confidence=round(vl_confidence, 3),
             vl_success=True
         )
 
@@ -99,6 +118,7 @@ def vl_packaging_understanding_node(
         return VLPackagingOutput(
             vl_extracted_data={},
             vl_raw_response=f"VL模型调用失败: {str(e)}",
+            vl_confidence=0.0,
             vl_success=False,
             vl_error=str(e)
         )

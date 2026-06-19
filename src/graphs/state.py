@@ -48,7 +48,12 @@ class GlobalState(BaseModel):
     raw_text: Optional[str] = Field(default="", description="OCR识别结果（兼容字段）")
     ocr_confidence: Optional[float] = Field(default=0.0, description="OCR识别置信度")
     ocr_regions: Optional[List[Dict[str, Any]]] = Field(default_factory=list, description="OCR识别区域列表（坐标+文本）")
-    structured_data: Optional[Dict[str, Any]] = Field(default_factory=dict, description="模型结构化提取的数据")
+    structured_data: Optional[Dict[str, Any]] = Field(default_factory=dict, description="模型结构化提取的数据（顶层字段+category_info扁平化合并）")
+    category_info: Optional[Dict[str, Any]] = Field(default_factory=dict, description="V5.4 品类特定字段对象（原始嵌套结构）")
+    warnings: Optional[List[str]] = Field(default_factory=list, description="V5.4 注意事项/安全警示")
+    ext_info: Optional[List[str]] = Field(default_factory=list, description="V5.4 非标信息数组")
+    structured_extraction_confidence: Optional[float] = Field(default=0.0, description="V5.4 结构化提取置信度")
+    missing_fields: Optional[List[str]] = Field(default_factory=list, description="V5.4 缺失字段列表")
     corrected_result: Optional[str] = Field(default="", description="智能纠错后的文本")
     qa_answer: Optional[str] = Field(default="", description="语义问答的答案")
     
@@ -284,8 +289,12 @@ class ModelExtractInput(BaseModel):
 
 
 class ModelExtractOutput(BaseModel):
-    """模型结构化提取节点输出"""
-    structured_data: Dict[str, Any] = Field(default_factory=dict, description="提取的结构化数据")
+    """模型结构化提取节点输出 - V5.4 商业化版（统一结构：product_type/brand/.../category_info）"""
+    # V5.4 核心字段 - 全量替换为商业化统一结构
+    structured_data: Dict[str, Any] = Field(default_factory=dict, description="提取的结构化数据（顶层字段+category_info扁平化合并，方便下游融合使用）")
+    category_info: Dict[str, Any] = Field(default_factory=dict, description="品类特定字段对象（来自LLM的category_info，保持原始嵌套结构）")
+    warnings: List[str] = Field(default_factory=list, description="注意事项/安全警示")
+    ext_info: List[str] = Field(default_factory=list, description="无法归入标准字段的非标信息")
     confidence: float = Field(default=0.0, description="提取置信度")
     missing_fields: List[str] = Field(default_factory=list, description="缺失字段列表")
     product_type: str = Field(default="", description="产品类型：食品/饮料/日化/个人护理/药品/电子产品/其他")
@@ -334,8 +343,11 @@ class ResultOutputInput(BaseModel):
     """结果输出节点输入"""
     ocr_result: Optional[str] = Field(default="", description="OCR识别结果")
     raw_text: Optional[str] = Field(default="", description="OCR识别结果（兼容字段）")
-    ocr_raw_result: Optional[str] = Field(default="", description="OCR识别结果（兼容字段）")
+    ocr_raw_result: Optional[str] = Field(default=None, description="OCR识别结果（兼容字段）")
     structured_data: Dict[str, Any] = Field(default_factory=dict, description="结构化数据")
+    category_info: Optional[Dict[str, Any]] = Field(default_factory=dict, description="V5.4 品类特定字段")
+    warnings: Optional[List[str]] = Field(default_factory=list, description="V5.4 注意事项")
+    ext_info: Optional[List[str]] = Field(default_factory=list, description="V5.4 非标信息")
     corrected_text: Optional[str] = Field(default=None, description="纠错文本")
     corrected_result: Optional[str] = Field(default=None, description="纠错文本（兼容字段）")
     qa_answer: Optional[str] = Field(default=None, description="问答答案")
