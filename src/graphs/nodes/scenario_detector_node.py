@@ -36,6 +36,9 @@ def scenario_detector_node(
         "finance_receipt": {"score": 0, "label": "金融票据/发票/收据"},
         "finance_statement": {"score": 0, "label": "银行回单/流水单"},
         "pharmaceutical": {"score": 0, "label": "药品包装/说明书"},
+        "contract": {"score": 0, "label": "合同/协议"},
+        "id_card": {"score": 0, "label": "证件/身份证/护照"},
+        "logistics": {"score": 0, "label": "物流单/快递单"},
         "general_document": {"score": 0, "label": "通用文档"},
     }
 
@@ -49,6 +52,12 @@ def scenario_detector_node(
             detections["pharmaceutical"]["score"] += 2
         if any(k in q for k in ["包装", "食品", "product", "packaging", "标签"]):
             detections["packaging"]["score"] += 2
+        if any(k in q for k in ["合同", "协议", "合约", "contract", "agreement"]):
+            detections["contract"]["score"] += 2
+        if any(k in q for k in ["证件", "身份证", "护照", "驾照", "id card", "passport", "license"]):
+            detections["id_card"]["score"] += 2
+        if any(k in q for k in ["物流", "快递", "运单", "logistics", "tracking", "shipment"]):
+            detections["logistics"]["score"] += 2
         if any(k in q for k in ["文档", "document", "通用", "general", "extract"]):
             detections["general_document"]["score"] += 1
 
@@ -111,7 +120,9 @@ E. 通用文档（其他各类文档、表格、信件）
 
         scenario_map_vl = {
             "A": "packaging", "B": "finance_receipt",
-            "C": "finance_statement", "D": "pharmaceutical", "E": "general_document",
+            "C": "finance_statement", "D": "pharmaceutical",
+            "E": "contract", "F": "id_card", "G": "logistics",
+            "H": "general_document",
         }
         for key, scenario in scenario_map_vl.items():
             if key in vl_text:

@@ -695,3 +695,37 @@ image_preprocess → image_quality_enhance → text_curvature_correct → image_
 - ✅ Schema字段定义（23个必填+60+可选字段）
 - ✅ ScenarioPipelineFactory.build()（按场景返回完整配置）
 - ✅ test_run端到端验证（含scenario_detector节点）
+
+## V5.8.1 8场景全扩展 + ConfigManager三级配置链
+**新增3场景**：合同(contract) / 证件(ID_card) / 物流单(logistics)
+
+| 场景 | 必填字段 | 输入类 | LLM配置文件 |
+|------|---------|-------|------------|
+| 🏪 packaging | 9 fields | PackagingInput | `config/model_extract_llm_cfg.json` |
+| 🧾 finance_receipt | 7 fields | FinanceReceiptInput | `config/finance_extract_llm_cfg.json` |
+| 🏦 finance_statement | 8 fields | FinanceStatementInput | `config/finance_statement_llm_cfg.json` |
+| 💊 pharmaceutical | 10 fields | PharmaInput | `config/pharma_extract_llm_cfg.json` |
+| 📝 contract | 8 fields | ContractInput | `config/contract_extract_llm_cfg.json` |
+| 🆔 id_card | 7 fields | IDCardInput | `config/id_card_extract_llm_cfg.json` |
+| 📦 logistics | 9 fields | LogisticsInput | `config/logistics_extract_llm_cfg.json` |
+| 📄 general_document | 3+ key_fields | GeneralInput | `config/general_extract_llm_cfg.json` |
+
+### ConfigManager场景级三级配置链
+```
+ConfigManager.resolve_scenario_config(scenario_type, tenant_id, runtime_config)
+    → scenario → node_id（查_SCENARIO_LLM_MAP）
+    → file配置（默认）→ tenant配置（DB）→ runtime注入（override）
+    → 返回model/sp/up/config四件套
+```
+
+### 架构演进：22节点运行图（8场景自动路由）
+```
+route_processing → scenario_detector（检测8种场景）
+                → image_preprocess → image_quality_enhance
+                → text_curvature_correct → image_quality_router
+                → [ocr_recognize → correct_text → model_extract←场景感知]
+                  [vl_packaging_understanding ]
+                → multi_channel_fusion → knowledge_inference
+                → category_template → qa_answer
+                → result_output → call_audit → feishu_notify → END
+```

@@ -2,7 +2,7 @@
 """场景Pipeline工厂：根据检测到的场景类型输出抽取配置"""
 import os, json
 from typing import Dict, Any, Optional
-from utils.scenario_schemas.registry import SchemaRegistry, default_registry
+from utils.scenario_schemas.registry import SchemaRegistry
 
 
 class ScenarioPipeline:
@@ -30,7 +30,7 @@ class ScenarioPipeline:
                     cls.SCENARIO_PROMPTS[scenario] = json.load(f)
             except (FileNotFoundError, json.JSONDecodeError):
                 # 降级：使用Schema中的SP
-                schema = default_registry.get(scenario)
+                schema = SchemaRegistry().get(scenario)
                 if schema:
                     cls.SCENARIO_PROMPTS[scenario] = {
                         "sp": schema.system_prompt,
@@ -44,7 +44,7 @@ class ScenarioPipeline:
         prompts = cls._load_prompts()
         config = prompts.get(scenario_type, prompts.get("general_document", {}))
         config["scenario_type"] = scenario_type
-        schema = default_registry.get(scenario_type)
+        schema = SchemaRegistry().get(scenario_type)
         if schema:
             config["fields"] = [{"name": f.name, "required": f.required, "type": f.field_type or "str"} for f in schema.fields]
         return config

@@ -1,7 +1,7 @@
 {
     "config": {
         "model": "doubao-seed-1.5",
-        "temperature": 0.0,
+        "temperature": 0,
         "top_p": 0.1,
         "max_completion_tokens": 4096,
         "thinking": "disabled"

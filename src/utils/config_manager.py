@@ -287,6 +287,24 @@ class ConfigManager:
         full = self.resolve(tenant_id, runtime_config)
         return full.get("llm", {}).get(node_id, {})
 
+    def resolve_scenario_config(self, scenario_type: str, tenant_id: Optional[str] = None,
+                                  runtime_config: Optional[Dict[str, Any]] = None) -> Dict[str, Any]:
+        """
+        解析场景级LLM配置（三级配置链）
+        
+        将场景类型映射到对应的LLM配置节点，然后走三级解析。
+        scenario_type → node_id → file(默认) → tenant(DB) → runtime(注入)
+        
+        Args:
+            scenario_type: 场景类型（packaging/finance_receipt/...）
+            tenant_id: 租户ID（可选）
+            runtime_config: 运行时注入配置（可选）
+        Returns:
+            解析后的LLM配置（含model/config/sp/up）
+        """
+        node_id = _SCENARIO_LLM_MAP.get(scenario_type, "general_extract")
+        return self.resolve_llm_config(node_id, tenant_id, runtime_config)
+
     # ── 工具方法 ────────────────────────────────────────────────
 
     @staticmethod
