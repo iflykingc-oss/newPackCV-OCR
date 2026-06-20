@@ -259,6 +259,21 @@ class TextCurvatureCorrectOutput(BaseModel):
 
 # ==================== 图出入参 ====================
 
+class ScenarioDetectInput(BaseModel):
+    """场景检测节点的输入"""
+    package_image: File = Field(..., description="商品包装/票据/文档图片")
+    user_question: Optional[str] = Field(default=None, description="用户问题（辅助场景识别）")
+
+class ScenarioDetectOutput(BaseModel):
+    """场景检测节点的输出"""
+    scenario_type: str = Field(..., description="检测到的场景类型：packaging/finance_receipt/finance_statement/pharmaceutical/general_document")
+    scenario_confidence: float = Field(..., description="检测置信度 0-1")
+    scenario_name: str = Field(default="", description="场景中文名")
+    scenario_schema_json: str = Field(default="{}", description="场景JSON Schema（序列化）")
+    preprocess_params: Dict[str, Any] = Field(default={}, description="预处理参数")
+    required_fields: List[str] = Field(default=[], description="该场景的必填字段列表")
+    auto_language: str = Field(default="auto", description="自动检测的语言")
+
 class GraphInput(BaseModel):
     """工作流输入"""
     package_image: File = Field(..., description="上传的包装图片（单图处理）")

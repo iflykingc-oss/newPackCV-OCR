@@ -43,6 +43,8 @@ from graphs.nodes.image_quality_router_node import image_quality_router_node
 from graphs.nodes.image_quality_enhance_node import image_quality_enhance_node
 from graphs.nodes.text_curvature_correct_node import text_curvature_correct_node
 from graphs.nodes.multi_language_ocr_enhanced_node import multi_language_ocr_enhanced_node
+# V5.8 多场景SOTA：场景自动检测
+from graphs.nodes.scenario_detector_node import scenario_detector_node
 
 
 def route_processing_mode(state: GlobalState) -> str:
@@ -114,6 +116,10 @@ builder.add_node("call_audit", call_audit_node)
 # ===== V5.5 图像质量路由 =====
 builder.add_node("image_quality_router", image_quality_router_node)
 
+# ===== V5.8 多场景SOTA：场景自动检测 =====
+builder.add_node("scenario_detector", scenario_detector_node,
+                 metadata={"type": "agent", "llm_cfg": "config/finance_extract_llm_cfg.json"})
+
 # ===== V5.6 能力提升：图像质量增强 / 弯曲文本校正 / 多语言OCR增强 =====
 builder.add_node("image_quality_enhance", image_quality_enhance_node)
 builder.add_node("text_curvature_correct", text_curvature_correct_node)
@@ -128,9 +134,12 @@ builder.add_conditional_edges(
     path=route_processing_condition,
     path_map={
         "批量处理": "batch_process",
-        "单图处理": "image_preprocess"
+        "单图处理": "scenario_detector"
     }
 )
+
+# 场景检测 → 预处理
+builder.add_edge("scenario_detector", "image_preprocess")
 
 # 批量处理 -> 结束
 builder.add_edge("batch_process", END)

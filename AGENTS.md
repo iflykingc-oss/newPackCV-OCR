@@ -618,3 +618,80 @@ image_preprocess → image_quality_enhance → text_curvature_correct → image_
 - ✅ 三级解析链：文件 > 数据库 > 运行时
 - ✅ 租户配置写入/读取/删除
 - ✅ test_run端到端验证（含`tenant_id`参数）
+
+### V5.8 多行业SOTA场景引擎（2026-07）
+
+#### 痛点
+单一包装场景无法覆盖金融票据/银行回单/医药说明书/通用文档等多行业需求。
+
+#### 架构升级
+```
+输入图片
+    ↓
+┌─────────────────────┐
+│ Scenario Detector   │  ← VL多模态 + 关键词双路融合
+│ (自动分类5大类)     │     packaging / finance_receipt /
+└─────────┬───────────┘     finance_statement / pharma / general
+          ↓
+┌─────────────────────┐
+│ Scenario Pipeline   │  ← 按场景选择Schema + 预处理 + LLM配置
+│ Factory             │     动态字段验证器
+└─────────┬───────────┘
+          ↓
+┌─────────────────────┐
+│ Schema Validator    │  ← 按场景Schema校验必填字段
+│ + Structured Output │     缺失字段标记 + 填充建议
+└─────────────────────┘
+```
+
+#### 5大场景Schema
+| 场景 | 必填字段 | 可选字段 | Schema文件 |
+|------|---------|---------|-----------|
+| **packaging** | product_type | brand/product_name/specification/manufacturer/production_date/shelf_life/batch_number/warnings/category_info/ext_info | `packaging.py` |
+| **finance_receipt** | merchant_name/receipt_date/total_amount | invoice_number/tax_amount/items[].name/items[].price/buyer_info/seller_info/currency/tax_rate/payment_method | `finance.py` |
+| **finance_statement** | account_holder/account_number/statement_date | transactions[].date/transactions[].desc/transactions[].amount/opening_balance/closing_balance/bank_name/currency | `finance.py` |
+| **pharmaceutical** | drug_name/approval_number/batch_number/expiry_date | manufacturer/dosage_form/specification/ingredients[.]/excipients[.]/storage_condition/precautions/indications | `pharma.py` |
+| **general_document** | document_type | key_fields{}（灵活Key-Value）/table_data[]（表格行）/summary/parties[].name/parties[].role/dates[]/amounts[]/reference_numbers[] | `general.py` |
+
+#### 场景检测节点（`scenario_detector_node.py`）
+- **VL多模态优先**：图片直送VL模型 → 返回5类之一 + 置信度
+- **关键词兜底**：VL不可用时 → 关键词正则匹配（中英文）
+- **用户辅助**：`user_question`字段帮助分类（如"这张发票多少钱" → finance_receipt）
+- **Schema注入**：检测结果自动关联对应Schema → 后续节点直接使用
+
+#### 场景Pipeline工厂（`scenario_pipeline.py`）
+- `build(scenario_type)` → 返回完整Pipeline配置
+- 自动关联：Schema + LLM配置文件 + 预处理参数
+- 运行时配置覆盖：`custom_model_config`可注入任意场景
+
+#### 场景LLM配置（新建4个文件）
+| 文件 | 功能 | 模型建议 |
+|------|------|---------|
+| `config/finance_extract_llm_cfg.json` | 金融票据提取 | GPT-4o / Qwen2.5-VL-72B |
+| `config/finance_statement_llm_cfg.json` | 银行流水/回单 | GPT-4o / Qwen2.5-VL-72B |
+| `config/pharma_extract_llm_cfg.json` | 药品信息提取 | GPT-4o / GLM-OCR |
+| `config/general_extract_llm_cfg.json` | 通用文档提取 | GPT-4o / DeepSeek-VL |
+
+#### 关键文件
+| 文件 | 类型 | 功能 |
+|------|------|------|
+| `src/graphs/nodes/scenario_detector_node.py` | **节点** | 场景自动检测（VL+关键词双路） |
+| `src/graphs/nodes/scenario_detector_node.py` | **节点** | 场景检测→Schema注入→预处理参数 |
+| `src/utils/scenario_schemas/base.py` | **工具** | `ScenarioField(BaseModel)` | 字段定义（name/type/required/description） |
+| `src/utils/scenario_schemas/packaging.py` | **工具** | PackagingSchema（11 + 场景 字段） |
+| `src/utils/scenario_schemas/finance.py` | **工具** | ReceiptSchema + StatementSchema（8+8必填） |
+| `src/utils/scenario_schemas/pharma.py` | **工具** | PharmaSchema 10 必填字段 |
+| `src/utils/scenario_schemas/general.py` | **工具** | GeneralSchema 灵活Key-Value |
+| `src/utils/scenario_schemas/registry.py` | **工具** | SchemaRegistry（注册/检测/获取） |
+| `src/utils/scenario_pipeline.py` | **工具** | ScenarioPipelineFactory |
+| `config/finance_extract_llm_cfg.json` | **配置** | 金融票据提取LLM配置 |
+| `config/finance_statement_llm_cfg.json` | **配置** | 银行流水回单LLM配置 |
+| `config/pharma_extract_llm_cfg.json` | **配置** | 药品信息提取LLM配置 |
+| `config/general_extract_llm_cfg.json` | **配置** | 通用文档提取LLM配置 |
+
+#### 验证
+- ✅ ScenarioSchemaRegistry初始化（5大场景全部注册）
+- ✅ 场景检测关键词测试（包装/金融收据/金融流水/医药/通用全部正确）
+- ✅ Schema字段定义（23个必填+60+可选字段）
+- ✅ ScenarioPipelineFactory.build()（按场景返回完整配置）
+- ✅ test_run端到端验证（含scenario_detector节点）
