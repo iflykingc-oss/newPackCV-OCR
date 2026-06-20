@@ -1,6 +1,6 @@
 # PackCV — 多行业文档智能提取引擎 🚀
 
-> **从包装到票据、从合同到药品——8大行业文档的SOTA级结构化信息提取**
+> **从包装到票据、从合同到药品——8大行业文档的结构化信息提取引擎**
 
 [![LangGraph](https://img.shields.io/badge/Workflow-LangGraph-blue)](https://langchain-ai.github.io/langgraph/)
 [![VLM-First](https://img.shields.io/badge/Architecture-VLM--First-green)](https://github.com/OpenBMB/MiniCPM-o)
