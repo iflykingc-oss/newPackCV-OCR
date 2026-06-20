@@ -1,187 +1,314 @@
-# PackCV-OCR 完整文档
+# PackCV — 多行业文档智能提取引擎 🚀
 
-## 项目概述
-PackCV-OCR 是一款面向货架/包装场景的高精度OCR识别解决方案，支持多引擎调度、智能纠错、效期检测和告警功能。
+> **从包装到票据、从合同到药品——8大行业文档的SOTA级结构化信息提取**
 
-## 核心功能
-- 📷 多引擎OCR识别（Tesseract/EasyOCR/PaddleOCR）
-- 🔍 YOLO目标检测与ROI裁切
-- ✨ 图像预处理增强
-- 🤖 LLM智能纠错与结构化提取
-- ⚠️ 效期检测与告警
-- 📊 报表生成与导出
+[![LangGraph](https://img.shields.io/badge/Workflow-LangGraph-blue)](https://langchain-ai.github.io/langgraph/)
+[![VLM-First](https://img.shields.io/badge/Architecture-VLM--First-green)](https://github.com/OpenBMB/MiniCPM-o)
+[![License](https://img.shields.io/badge/License-Apache%202.0-orange)](LICENSE)
 
-## 目录结构
+---
+
+## 🌟 核心亮点
+
+| 能力 | 说明 |
+|------|------|
+| **8行业场景** | 包装/金融票据/银行流水/医药/合同/证件/物流/通用 |
+| **VLM-First架构** | 多模态视觉理解为主，OCR为辅，三级置信度融合 |
+| **智能引擎梯级** | LightOnOCR-2-1B 🥇 → DeepSeek-OCR 🥈 → 现有引擎 🏁 自动降级 |
+| **三级配置链** | 文件默认 → 租户DB → 运行时注入，零重启热切换 |
+| **开放模型生态** | 任意OpenAI兼容端点（vLLM/Ollama/OpenAI/Claude/通义千问等） |
+| **IM平台原生** | 飞书/钉钉/企微一键发布，多租户SaaS就绪 |
+
+---
+
+## 📋 支持场景
+
+| 场景 | 场景ID | 典型用例 | 核心字段 |
+|------|--------|---------|---------|
+| 🏪 **商品包装** | `packaging` | 食品/日化/饮料包装 | brand, ingredients, shelf_life, nutrition_info |
+| 🧾 **金融票据** | `finance_receipt` | 发票/收据/购物小票 | merchant, date, total_amount, items[] |
+| 🏦 **银行流水** | `finance_statement` | 回单/对账单 | account, transactions[], balance |
+| 💊 **医药包装** | `pharmaceutical` | 药品说明/包装盒 | drug_name, approval_number, batch, expiry |
+| 📝 **合同协议** | `contract` | 商务/租赁/采购合同 | contract_number, parties, amount, terms[] |
+| 🆔 **证件识别** | `id_card` | 身份证/护照/驾照 | id_number, name, issuing_authority |
+| 📦 **物流单据** | `logistics` | 快递单/运单/装箱单 | tracking_number, sender, destination, items[] |
+| 📄 **通用文档** | `general_document` | 任意文档 | key_fields{}, table_data[], parties[] |
+
+> **自动场景检测**：上传图片 → VL模型自动识别场景类型 → 调用对应Schema → 定向提取
+
+---
+
+## 🏗 架构全景
+
 ```
-newPackCV-OCR/
-├── config/                  # 配置文件
-├── assets/                  # 静态资源与测试图片
-├── scripts/                 # 运维脚本
-├── deploy/                  # 部署配置
-├── docs/                    # 文档
-├── src/
-│   ├── core/               # 核心能力模块
-│   │   ├── cv/            # CV视觉层
-│   │   ├── ocr/           # OCR识别层
-│   │   ├── llm/           # 融合决策层
-│   │   └── rule_engine/   # 规则引擎
-│   ├── graphs/            # LangGraph工作流
-│   ├── storage/           # 存储层
-│   ├── api/               # HTTP API
-│   ├── cli/               # 命令行工具
-│   ├── utils/             # 工具函数
-│   └── tests/             # 测试套件
-├── pyproject.toml
-└── uv.lock
+                    ┌──────────────────────────────────────────┐
+  Upload Image ──▶ │        SmartOCREngine / SmartVLEngine      │
+                    │  (LightOnOCR▶DeepSeekOCR▶FallbackOCR)     │
+                    └────────────────┬─────────────────────────┘
+                                     ▼
+                    ┌──────────────────────────────────────────┐
+                    │         Scenario Detector (8场景)          │
+                    │  VL多模态分类(主) + 关键词正则(备)          │
+                    └────────────────┬─────────────────────────┘
+                                     ▼
+                    ┌──────────────────────────────────────────┐
+                    │       Scenario Schema Registry            │
+                    │  场景▶字段定义▶验证规则▶LLM模板            │
+                    └────────────────┬─────────────────────────┘
+                                     ▼
+                    ┌──────────────────────────────────────────┐
+                    │     ConfigManager 三级配置链               │
+                    │  文件(默认) → DB(租户) → Runtime(注入)     │
+                    └────────────────┬─────────────────────────┘
+                                     ▼
+┌─────────────────────────────────────────────────────────────────┐
+│  LangGraph 22节点工作流                                          │
+│  route→detect→preprocess→enhance→curvature→quality_router       │
+│  → [ocr_recognize→correct] ∥ [vl_understanding]                 │
+│  → fusion→inference→template→qa→output→audit→push               │
+└─────────────────────────────────────────────────────────────────┘
+                                     ▼
+                    ┌──────────────────────────────────────────┐
+                    │         结构化 JSON 输出                    │
+                    │  经过Schema验证，字段级置信度标注            │
+                    └──────────────────────────────────────────┘
+
+          ┌────────────┬─────────────┬─────────────┐
+          ▼            ▼             ▼             ▼
+       飞书机器人    钉钉机器人    企微机器人    REST API
 ```
 
-## 快速开始
+---
 
-### 安装
+## 🚀 快速开始
+
+### 1. 安装
+
 ```bash
-# 克隆项目
-git clone https://github.com/your-org/PackCV-OCR.git
-cd PackCV-OCR
+git clone https://github.com/your-org/packcv.git
+cd packcv
 
-# 安装依赖
+# 使用 uv 安装（推荐）
 uv sync
 
-# 安装OCR引擎
-apt-get install tesseract-ocr tesseract-ocr-chi-sim
+# 安装中文OCR引擎
+apt-get install tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-jpn tesseract-ocr-kor
+
+# 安装PaddleOCR（可选，多语言增强）
+uv add paddleocr
 ```
 
-### 使用CLI
+### 2. 启动服务
+
 ```bash
-# 单图识别
-packcv recognize image.jpg
+# 启动API服务器（端口 9000）
+python src/main.py
 
-# 批量识别
-packcv batch ./images/ -o ./output/
-
-# 生成报表
-packcv report ./output/ -t expiry
-```
-
-### 使用Python API
-```python
-from src.core.ocr.ocr_scheduler import OCRScheduler
-from utils.file.file import File
-
-scheduler = OCRScheduler()
-result = scheduler.recognize(image_bytes)
-
-print(result.raw_text)
-print(result.structured_data)
-```
-
-### Docker部署
-```bash
-cd deploy
+# 或使用 Docker
 docker-compose up -d
 ```
 
-## API文档
+### 3. 调用API
 
-### 识别接口
-```http
-POST /api/v1/recognize
-Content-Type: application/json
+```bash
+# 基础识别（自动场景检测）
+curl -X POST http://localhost:9000/ocr/recognize \
+  -H "Content-Type: application/json" \
+  -d '{"image_url": "https://example.com/product.jpg"}'
 
+# 指定场景 + 自定义模型
+curl -X POST http://localhost:9000/ocr/recognize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "image_url": "https://example.com/invoice.jpg",
+    "custom_model": "gpt-4o",
+    "ocr_engine": "smart"
+  }'
+
+# 多租户（带上tenant_id，配置自动继承）
+curl -X POST http://localhost:9000/ocr/recognize \
+  -H "Content-Type: application/json" \
+  -d '{
+    "image_url": "https://example.com/medicine.jpg",
+    "tenant_id": "pharma_corp_a"
+  }'
+```
+
+### 4. Web Demo
+
+浏览器打开 `http://localhost:9000/demo`——拖拽图片即得结构化JSON。
+
+---
+
+## ⚙️ 配置体系
+
+### 三级配置链（优先级递增）
+
+```
+Level 1: 文件配置（静态全局默认）
+         config/model_extract_llm_cfg.json
+         config/finance_extract_llm_cfg.json
+         config/pharma_extract_llm_cfg.json
+         src/config/engine_adapter_cfg.json
+
+Level 2: 租户DB（多租户覆盖）
+         POST /api/config/tenant/{tenant_id}
+         {"scenario_overrides": {"finance_receipt": {"model": "gpt-4o"}}}
+
+Level 3: 运行时注入（单次请求覆盖）
+         {"custom_model_config": {"model": "claude-3-5-sonnet"}}
+```
+
+### 自定义模型接入
+
+配置文件 `src/config/engine_adapter_cfg.json`：
+
+```json
 {
-    "image_base64": "...",
-    "enhance": true,
-    "detect": false
+  "ocr_engines": {
+    "lighton_ocr": { "priority": 1 },
+    "deepseek_ocr": { "priority": 2 },
+    "fallback": { "engine": "builtin" },
+    "custom_engines": [
+      {
+        "name": "my-ocr",
+        "endpoint": "http://my-vllm-server:8000/v1",
+        "model": "my-ocr-model",
+        "api_key": "sk-xxx",
+        "priority": 0
+      }
+    ]
+  }
 }
 ```
 
-### 批量识别
-```http
-POST /api/v1/recognize/batch
-Content-Type: application/json
+支持任意 **OpenAI兼容API** 的端点：vLLM / Ollama / OpenAI / Claude / 通义千问 / DeepSeek
 
+---
+
+## 🧩 智能引擎梯级
+
+| 层级 | 引擎 | 条件 | 速度 | 语言支持 |
+|------|------|------|------|---------|
+| 🥇 | LightOnOCR-2-1B | 有GPU或API Key | 5.71页/秒/H100 | 50+语言 |
+| 🥈 | DeepSeek-OCR | 有GPU或API Key | 100 tokens超压缩 | 100+语言 |
+| 🥉 | 自定义模型 | 配置了endpoint | 取决于服务 | 自定义 |
+| 🏁 | Fallback引擎 | 必可用（不依赖GPU） | 即时 | Tesseract/PaddleOCR |
+
+> 无GPU、无API Key？自动降级到🏁，零中断。
+
+---
+
+## 🤖 IM平台发布（SaaS多租户）
+
+### 配置管理API
+
+```http
+# 设置租户场景配置
+PUT /api/config/tenant/{tenant_id}
 {
-    "images": ["...", "..."],
-    "enhance": true
+  "scenario_overrides": {
+    "finance_receipt": {
+      "model": "gpt-4o",
+      "temperature": 0.0
+    },
+    "pharmaceutical": {
+      "model": "claude-3-5-sonnet",
+      "temperature": 0.1
+    }
+  }
 }
+
+# 查看配置摘要
+GET /api/config/summary
+
+# 删除租户配置（恢复默认）
+DELETE /api/config/tenant/{tenant_id}
 ```
 
-### 获取告警
-```http
-GET /api/v1/alerts?status=pending&limit=100
+### 飞书/钉钉/企微机器人
+
+1. 创建飞书自定义机器人 → 复制Webhook URL
+2. 配置 `src/config/im_platform.json`
+3. 用户在群聊中发送图片→机器人自动识别并返回结构化结果
+
+---
+
+## 📊 技术栈
+
+| 组件 | 技术 |
+|------|------|
+| 工作流引擎 | LangGraph (22节点DAG) |
+| 多模态VL | MiniCPM-o / VLM-First |
+| OCR引擎 | LightOnOCR / DeepSeek-OCR / PaddleOCR / Tesseract |
+| 后端 | Python FastAPI |
+| 配置存储 | SQLite (支持迁移到PostgreSQL) |
+| 容器化 | Docker / Docker Compose |
+| 部署 | 支持Kubernetes |
+
+---
+
+## 📁 目录结构
+
+```
+packcv/
+├── config/                      # LLM配置文件（8场景）
+│   ├── model_extract_llm_cfg.json
+│   ├── finance_extract_llm_cfg.json
+│   ├── pharma_extract_llm_cfg.json
+│   ├── contract_extract_llm_cfg.json
+│   └── ...
+├── src/
+│   ├── graphs/
+│   │   ├── graph.py            # 22节点主图编排
+│   │   ├── state.py            # 状态定义
+│   │   └── nodes/              # 节点实现
+│   │       ├── scenario_detector_node.py
+│   │       ├── image_quality_enhance_node.py
+│   │       ├── text_curvature_correct_node.py
+│   │       └── ...
+│   ├── utils/
+│   │   ├── ocr_engines/        # OCR引擎适配器
+│   │   ├── vl_engines/         # VL引擎适配器
+│   │   ├── scenario_schemas/   # 8场景Schema注册中心
+│   │   ├── config_manager.py   # 三级配置链
+│   │   ├── scenario_pipeline.py
+│   │   └── im_platform/        # 飞书/钉钉/企微
+│   ├── web_server.py           # API服务 + Admin
+│   ├── main.py                 # 启动入口
+│   └── static/demo.html        # Web Demo
+├── docker-compose.yml
+├── Dockerfile
+└── AGENTS.md                   # 完整节点清单
 ```
 
-## 架构设计
+---
 
-### 三层融合架构
-1. **CV视觉层**：图像预处理、目标检测、ROI裁切
-2. **OCR识别层**：多引擎调度、文本识别、置信度评分
-3. **融合决策层**：结果合并、LLM条件触发、规则引擎
+## 🧪 验证
 
-### OCR引擎优先级
-1. Tesseract（最快，无需下载模型）
-2. EasyOCR（多语言支持）
-3. PaddleOCR（中文印刷体最优）
-
-### LLM触发条件
-- OCR置信度 < 0.85
-- 日期格式无法解析
-- 多引擎结果冲突
-- 核心字段缺失
-
-## 配置说明
-
-### 环境变量
-| 变量 | 说明 | 默认值 |
-|------|------|--------|
-| DB_HOST | 数据库主机 | localhost |
-| DB_PORT | 数据库端口 | 5432 |
-| REDIS_HOST | Redis主机 | localhost |
-| OSS_ENDPOINT | OSS端点 | - |
-| LOG_LEVEL | 日志级别 | INFO |
-
-### 引擎配置
-在 `config/engines.yaml` 中配置各引擎的优先级和参数。
-
-## 测试
-
-### 运行测试
 ```bash
-pytest src/tests/ -v
+# 完整端到端测试
+python -c "
+from src.graphs.graph import main_graph
+result = main_graph.invoke({
+    'package_image': File(url='https://...', file_type='image'),
+    'ocr_engine_type': 'smart'
+})
+print(result['structured_data'])
+"
 
-# 性能基准测试
-pytest src/tests/benchmark.py -v
+# 运行test_run
+test_run params='{"package_image": {"url": "...", "file_type": "image"}}'
 ```
 
-### 准确率测试
-使用标准测试集验证识别准确率：
-```bash
-python -m src.tests.accuracy_test --dataset ./test_dataset/
-```
+---
 
-## 部署
+## 📄 许可证
 
-### Docker Compose
-```bash
-docker-compose -f deploy/docker-compose.yml up -d
-```
+Apache License 2.0
 
-### Kubernetes
-```bash
-kubectl apply -f deploy/k8s-deployment.yaml
-```
+---
 
-## 性能指标
-- 单图OCR识别：< 2秒
-- 批量处理吞吐量：> 5张/秒
-- OCR识别准确率：> 90%
-- 服务可用性：> 99.9%
+## 🤝 贡献
 
-## 许可证
-MIT License
-
-## 贡献指南
-1. Fork 项目
-2. 创建功能分支 (`git checkout -b feature/amazing-feature`)
-3. 提交更改 (`git commit -m 'Add amazing feature'`)
-4. 推送到分支 (`git push origin feature/amazing-feature`)
-5. 创建Pull Request
+欢迎Issue和PR！提出新场景、新引擎接入、或改进现有Schema。
