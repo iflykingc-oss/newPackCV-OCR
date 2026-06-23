@@ -159,7 +159,7 @@ class OCRRecord(Base):
     image_height = Column(Integer)
     
     # OCR引擎配置
-    ocr_engine_type = Column(String(20), nullable=False)  # builtin, api
+    ocr_engine_type = Column(String(20), nullable=False, default="auto")  # auto(推荐)/smart/builtin/api
     ocr_engine_name = Column(String(50))
     ocr_api_config_id = Column(Integer)
     

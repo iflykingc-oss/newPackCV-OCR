@@ -2,9 +2,10 @@
 
 按优先级链式调用多个OCR引擎：
 1. [自定义引擎] priority=0（最高，用户自部署模型）
-2. LightOnOCR-2-1B（priority=10，1B参数）
-3. DeepSeek-OCR（priority=20，3B参数）
-4. Fallback（始终可用，保底）
+2. Unlimited-OCR（priority=5，百度SOTA长文档解析）
+3. LightOnOCR-2-1B（priority=10，1B参数）
+4. DeepSeek-OCR（priority=20，3B参数）
+5. Fallback（始终可用，保底）
 
 策略：
 - 按priority升序调用（0最高）
@@ -18,6 +19,7 @@ from typing import Optional, Dict, Any, List, Tuple
 from utils.ocr_engines.base import BaseOCREngine, OCRResult
 from utils.ocr_engines.lighton_ocr import LightOnOCREngine
 from utils.ocr_engines.deepseek_ocr import DeepSeekOCREngine
+from utils.ocr_engines.unlimited_ocr import UnlimitedOCREngine
 from utils.ocr_engines.fallback_ocr import FallbackOCREngine
 from utils.ocr_engines.custom_ocr import CustomOCREngine
 
@@ -50,12 +52,17 @@ class SmartOCREngine(BaseOCREngine):
         lighton = LightOnOCREngine(lighton_cfg)
         self._engines.append(("lighton_ocr", lighton, 0.85, 10))
 
-        # 3. DeepSeek-OCR
+        # 3. Unlimited-OCR (百度SOTA, priority=5 → 排在LightOn之前)
+        unlimited_cfg = ocr_cfg.get("unlimited_ocr", {})
+        unlimited = UnlimitedOCREngine(unlimited_cfg)
+        self._engines.append(("unlimited_ocr", unlimited, 0.85, 5))
+
+        # 4. DeepSeek-OCR
         ds_cfg = ocr_cfg.get("deepseek_ocr", {})
         deepseek = DeepSeekOCREngine(ds_cfg)
         self._engines.append(("deepseek_ocr", deepseek, 0.80, 20))
 
-        # 4. Fallback（始终可用，最低优先级）
+        # 5. Fallback（始终可用，最低优先级）
         fb_cfg = ocr_cfg.get("fallback", {"engine_type": self._config.get("engine_type", "builtin")})
         fallback = FallbackOCREngine(fb_cfg)
         self._engines.append(("fallback", fallback, 0.0, 999))

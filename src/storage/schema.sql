@@ -100,7 +100,7 @@ CREATE TABLE IF NOT EXISTS ocr_records (
     image_height INTEGER,
     
     -- OCR引擎配置
-    ocr_engine_type VARCHAR(20) NOT NULL, -- builtin, api
+    ocr_engine_type VARCHAR(20) NOT NULL DEFAULT 'auto', -- auto(推荐)/smart/builtin/api
     ocr_engine_name VARCHAR(50),
     ocr_api_config_id INTEGER,
     

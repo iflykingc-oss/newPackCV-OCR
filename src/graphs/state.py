@@ -14,12 +14,12 @@ from utils.file.file import File
 class GlobalState(BaseModel):
     """全局状态定义 - 包含工作流流转的所有数据"""
     # 输入数据（从GraphInput合并）
-    package_image: File = Field(..., description="包装图片（瓶子、包装盒、包装袋等）")
+    package_image: File = Field(default_factory=lambda: File(url="", file_type="default"), description="包装图片（单图处理，与document_file二选一）")
     shelf_image: Optional[File] = Field(default=None, description="货架图片（PackCV-OCR场景）")
     images: Optional[List[File]] = Field(default=None, description="多张图片列表（批量处理）")
     processing_mode: Optional[str] = Field(default="single", description="处理模式：single（单图）或 batch（批量）")
     cv_model: Optional[str] = Field(default="yolov8", description="CV模型类型（PackCV-OCR）")
-    ocr_engine_type: Literal["builtin", "api", "rapidocr", "paddleocr", "tesseract", "smart"] = Field(default="builtin", description="OCR引擎类型")
+    ocr_engine_type: Literal["builtin", "api", "rapidocr", "paddleocr", "tesseract", "smart", "auto"] = Field(default="auto", description="OCR引擎类型：auto=SmartOCR链式路由(推荐), smart=同auto, builtin=本地多引擎融合")
     ocr_api_config: Optional[Dict[str, Any]] = Field(default=None, description="OCR API配置")
     model_type: Literal["extract", "correct", "qa"] = Field(default="extract", description="模型调用类型")
     model_name: str = Field(default="doubao-seed-2-0-pro-260215", description="大模型名称")
@@ -40,6 +40,13 @@ class GlobalState(BaseModel):
     low_stock_threshold: int = Field(default=10, description="低库存阈值")
     max_workers: int = Field(default=10, description="最大并行处理数")
     detection_threshold: float = Field(default=0.5, description="CV检测置信度阈值")
+    
+    # V5.9 新增：条码/印章/文档解析结果
+    input_type: str = Field(default="image", description="输入类型(image/document)")
+    barcode_results: List[Dict[str, Any]] = Field(default_factory=list, description="条码/二维码检测结果")
+    stamp_results: List[Dict[str, Any]] = Field(default_factory=list, description="印章检测结果")
+    document_markdown: Optional[str] = Field(default=None, description="MinerU文档解析Markdown结果")
+    document_tables: List[Dict[str, Any]] = Field(default_factory=list, description="文档表格提取结果")
     
     # 中间状态（单图处理）
     preprocessed_image: Optional[File] = Field(default=None, description="预处理后的图片")
@@ -146,6 +153,8 @@ class MultiChannelFusionInput(BaseModel):
     ocr_confidence: Optional[float] = Field(default=0.7, description="OCR通道整体置信度")
     vl_confidence: Optional[float] = Field(default=0.7, description="VL通道整体置信度")
     fusion_method: str = Field(default="weighted_score", description="融合方法：weighted_score/consensus/voting")
+    # V5.9 内嵌检测：条码+印章（在融合节点内部并行执行，无需额外图节点）
+    package_image: Optional[File] = Field(default=None, description="原图（用于内嵌条码/印章检测）")
 
 
 class MultiChannelFusionOutput(BaseModel):
@@ -154,6 +163,9 @@ class MultiChannelFusionOutput(BaseModel):
     fused_confidence: float = Field(default=0.0, description="融合后的整体置信度")
     fusion_field_count: int = Field(default=0, description="参与融合的字段数")
     fusion_consensus_count: int = Field(default=0, description="两通道一致字段数")
+    # V5.9 内嵌检测输出
+    barcode_results: List[Dict[str, Any]] = Field(default_factory=list, description="条码/二维码检测结果")
+    stamp_results: List[Dict[str, str]] = Field(default_factory=list, description="印章/公章检测结果")
     fusion_conflict_count: int = Field(default=0, description="两通道冲突字段数")
     fusion_decisions: List[Dict[str, Any]] = Field(default_factory=list, description="字段级融合决策")
     fusion_method: str = Field(default="weighted_score", description="使用的融合方法")
@@ -276,9 +288,10 @@ class ScenarioDetectOutput(BaseModel):
 
 class GraphInput(BaseModel):
     """工作流输入"""
-    package_image: File = Field(..., description="上传的包装图片（单图处理）")
+    package_image: File = Field(default_factory=lambda: File(url="", file_type="default"), description="上传的包装图片（单图处理）")
+    document_file: Optional[File] = Field(default=None, description="上传的文档文件（PDF/DOCX/PPTX/XLSX，与package_image二选一）")
     images: Optional[List[File]] = Field(default=None, description="上传的图片列表（批量处理，优先级高于package_image）")
-    ocr_engine_type: Literal["builtin", "api", "rapidocr", "smart"] = Field(default="builtin", description="OCR引擎类型：builtin（内置多引擎融合）、api（外部API）、rapidocr（ONNX引擎）")
+    ocr_engine_type: Literal["builtin", "api", "rapidocr", "smart", "auto"] = Field(default="auto", description="OCR引擎类型：auto=SmartOCR链式路由(推荐), smart=同auto, builtin=本地多引擎融合")
     ocr_api_config: Optional[Dict[str, Any]] = Field(default=None, description="OCR API配置（当engine_type=api时使用）")
     model_type: Literal["extract", "correct", "qa"] = Field(default="extract", description="模型调用类型：extract（结构化提取）、correct（智能纠错）、qa（语义问答）")
     model_name: Optional[str] = Field(default="doubao-seed-2-0-pro-260215", description="使用的大模型名称")
@@ -315,6 +328,38 @@ class GraphOutput(BaseModel):
     auto_language: Optional[str] = Field(default=None, description="自动检测的语言")
 
 
+# ==================== V5.9 智能后处理节点（合并 knowledge_inference + category_template）====================
+
+class SmartPostprocessInput(BaseModel):
+    """智能后处理节点输入"""
+    fused_structured_data: Dict[str, Any] = Field(default_factory=dict, description="融合后的结构化数据（来自multi_channel_fusion）")
+    raw_text: str = Field(default="", description="OCR原始文本")
+    product_type: str = Field(default="", description="产品类型")
+    detected_category: str = Field(default="", description="上游已检测的品类（可选）")
+
+
+class SmartPostprocessOutput(BaseModel):
+    """智能后处理节点输出"""
+    detected_category: str = Field(default="其他", description="检测到的产品品类")
+    template_name: str = Field(default="其他", description="使用的模板名")
+    required_fields: List[str] = Field(default_factory=list, description="品类必填字段")
+    optional_fields: List[str] = Field(default_factory=list, description="品类可选字段")
+    missing_required_fields: List[str] = Field(default_factory=list, description="缺失的必填字段")
+    field_coverage: float = Field(default=0.0, description="必填字段覆盖率（0-1）")
+    field_validation: Dict[str, Any] = Field(default_factory=dict, description="字段级验证结果")
+    completion_suggestions: List[Dict[str, str]] = Field(default_factory=list, description="补全建议")
+    reordered_data: Dict[str, Any] = Field(default_factory=dict, description="按优先级重排+推理补全后的数据")
+    inferred_fields: List[Dict[str, Any]] = Field(default_factory=list, description="知识推理补充的字段列表")
+    inferred_product_type: str = Field(default="", description="推理推断的产品类型")
+
+
+# ==================== QA条件分支 ====================
+
+class QaConditionalInput(BaseModel):
+    """QA条件分支判断输入"""
+    user_question: str = Field(default="", description="用户提问（非空时触发QA）")
+
+
 # ==================== 图片预处理节点 ====================
 
 class ImagePreprocessInput(BaseModel):
@@ -339,7 +384,7 @@ class OCRRecognizeInput(BaseModel):
     preprocessed_image: Optional[File] = Field(default=None, description="预处理后的图片")
     corrected_image: Optional[File] = Field(default=None, description="弯曲校正后的图片（V5.6）")
     processing_info: Optional[Dict[str, Any]] = Field(default=None, description="预处理阶段的质量评估信息")
-    ocr_engine_type: Literal["builtin", "api", "rapidocr", "paddleocr", "tesseract", "smart"] = Field(default="builtin", description="OCR引擎类型")
+    ocr_engine_type: Literal["builtin", "api", "rapidocr", "paddleocr", "tesseract", "smart", "auto"] = Field(default="auto", description="OCR引擎类型：auto=SmartOCR链式路由(推荐), smart=同auto, builtin=本地多引擎融合")
     ocr_api_config: Optional[Dict[str, Any]] = Field(default=None, description="OCR API配置")
     custom_model_config: Optional[Dict[str, Any]] = Field(default=None, description="运行时自定义模型配置，覆盖配置文件中的custom_engines")
 
@@ -542,7 +587,7 @@ class RouteProcessingOutput(BaseModel):
 class BatchProcessInput(BaseModel):
     """批量处理节点输入"""
     images: List[File] = Field(..., description="待处理的图片列表")
-    ocr_engine_type: Literal["builtin", "api", "rapidocr", "paddleocr", "tesseract", "smart"] = Field(default="builtin", description="OCR引擎类型")
+    ocr_engine_type: Literal["builtin", "api", "rapidocr", "paddleocr", "tesseract", "smart", "auto"] = Field(default="auto", description="OCR引擎类型：auto=SmartOCR链式路由(推荐), smart=同auto, builtin=本地多引擎融合")
     ocr_api_config: Optional[Dict[str, Any]] = Field(default=None, description="OCR API配置")
     export_format: Literal["json", "excel", "pdf"] = Field(default="json", description="导出格式")
     model_type: Optional[Literal["extract", "correct", "qa"]] = Field(default=None, description="模型调用类型（可选）")
@@ -604,7 +649,7 @@ class ParallelProcessingInput(BaseModel):
     """并行处理引擎节点输入"""
     roi_images: List[File] = Field(..., description="裁切后的图片列表")
     roi_regions: List[Dict[str, Any]] = Field(default_factory=list, description="裁切区域信息")
-    ocr_engine_type: Literal["builtin", "api", "tesseract", "smart"] = Field(default="builtin", description="OCR引擎类型")
+    ocr_engine_type: Literal["builtin", "api", "tesseract", "smart", "auto"] = Field(default="auto", description="OCR引擎类型：auto=SmartOCR链式路由(推荐), smart=同auto, builtin=本地多引擎融合")
     ocr_api_config: Optional[Dict[str, Any]] = Field(default=None, description="OCR API配置")
     max_workers: int = Field(default=10, description="最大并行处理数")
     enable_expiry_detection: bool = Field(default=True, description="是否启用效期检测")
@@ -653,6 +698,84 @@ class QuantityCountOutput(BaseModel):
     category_breakdown: List[Dict[str, Any]] = Field(default_factory=list, description="分类统计")
     inventory_status: Dict[str, Any] = Field(default_factory=dict, description="库存状态")
     total_items: int = Field(default=0, description="总物品数")
+
+
+# ==================== V5.9 新增节点状态 ====================
+
+# --- 输入类型路由 ---
+
+class InputTypeRouteInput(BaseModel):
+    """输入类型路由节点输入"""
+    package_image: Optional[File] = Field(default=None, description="输入的图片/文档文件")
+    file_url: Optional[str] = Field(default="", description="文件URL（直接传入URL时使用）")
+
+class InputTypeRouteOutput(BaseModel):
+    """输入类型路由节点输出"""
+    input_type: Literal["image", "document", "unsupported"] = Field(default="image", description="检测到的输入类型")
+    file_url: str = Field(default="", description="标准化后的文件URL")
+    file_type: str = Field(default="", description="文件后缀类型")
+    confidence: float = Field(default=0.0, description="类型判断置信度")
+    reason: str = Field(default="", description="判断依据")
+
+
+# --- 文档解析（MinerU引擎） ---
+
+class DocumentParseInput(BaseModel):
+    """文档解析节点输入"""
+    file_url: str = Field(..., description="待解析文档URL（PDF/DOCX/PPTX/XLSX）")
+    file_type: str = Field(default="", description="文件类型后缀")
+    scenario_type: Optional[str] = Field(default="general_document", description="检测到的场景类型")
+    engine_mode: Literal["pipeline", "auto"] = Field(default="auto", description="MinerU引擎模式")
+    ocr_language: str = Field(default="auto", description="OCR语言（auto自动检测）")
+
+class DocumentParseOutput(BaseModel):
+    """文档解析节点输出"""
+    markdown_output: str = Field(default="", description="文档解析Markdown完整内容")
+    tables: List[Dict[str, Any]] = Field(default_factory=list, description="表格提取结果（HTML格式）")
+    metadata: Dict[str, Any] = Field(default_factory=dict, description="文档元数据（页数、作者等）")
+    reading_order_text: str = Field(default="", description="按阅读顺序排列的文本内容")
+    layout_info: List[Dict[str, Any]] = Field(default_factory=list, description="版面分析结果（段落坐标、类型）")
+    total_pages: int = Field(default=0, description="总页数")
+    parse_time: float = Field(default=0.0, description="解析耗时（秒）")
+    engine_used: str = Field(default="mineru", description="实际使用的解析引擎")
+
+
+# --- 条码/二维码解码 ---
+
+class BarcodeDetectInput(BaseModel):
+    """条码检测节点输入"""
+    package_image: File = Field(..., description="待检测图片")
+    barcode_types: List[str] = Field(default_factory=lambda: ["qr", "code128", "ean13", "ean8", "upca", "code39", "itf", "pdf417"], description="启用的条码类型列表")
+
+class BarcodeDetectOutput(BaseModel):
+    """条码检测节点输出"""
+    barcodes: List[Dict[str, Any]] = Field(default_factory=list, description="检测到的条码列表（type, data, rect, confidence）")
+    total_found: int = Field(default=0, description="检测到的条码总数")
+    has_barcode: bool = Field(default=False, description="是否检测到条码")
+
+
+# --- 印章检测 ---
+
+class StampDetectInput(BaseModel):
+    """印章检测节点输入"""
+    package_image: File = Field(..., description="待检测图片")
+
+class StampDetectOutput(BaseModel):
+    """印章检测节点输出"""
+    stamps: List[Dict[str, Any]] = Field(default_factory=list, description="检测到的印章列表（type, rect, text_if_available, confidence）")
+    total_found: int = Field(default=0, description="检测到的印章总数")
+    has_stamp: bool = Field(default=False, description="是否检测到印章")
+
+
+# --- 表格结构化提取 ---
+
+class TableExtractOutput(BaseModel):
+    """表格结构化提取节点输出"""
+    tables_markdown: List[str] = Field(default_factory=list, description="表格Markdown表示")
+    tables_html: List[str] = Field(default_factory=list, description="表格HTML表示")
+    tables_csv: List[str] = Field(default_factory=list, description="表格CSV表示")
+    total_tables: int = Field(default=0, description="表格总数")
+    has_tables: bool = Field(default=False, description="是否包含表格")
 
 
 # --- 智能告警引擎节点 ---
@@ -705,7 +828,7 @@ class PackCVGraphInput(BaseModel):
     """PackCV-OCR工作流输入"""
     shelf_image: File = Field(..., description="货架/多包装图片")
     cv_model: str = Field(default="yolov8", description="CV模型类型")
-    ocr_engine_type: Literal["builtin", "api", "tesseract", "smart"] = Field(default="builtin", description="OCR引擎类型")
+    ocr_engine_type: Literal["builtin", "api", "tesseract", "smart", "auto"] = Field(default="auto", description="OCR引擎类型：auto=SmartOCR链式路由(推荐), smart=同auto, builtin=本地多引擎融合")
     enable_expiry_detection: bool = Field(default=True, description="是否启用效期检测")
     enable_inventory_analysis: bool = Field(default=True, description="是否启用库存分析")
     enable_alerts: bool = Field(default=True, description="是否启用告警")
@@ -999,7 +1122,7 @@ class OCRRecognizeInputV2(BaseModel):
     enable_vertical_text: bool = Field(default=True, description="是否支持竖排文本")
     use_paddle_ocr_v5: bool = Field(default=True, description="是否使用PP-OCRv5模型")
     # 原有参数
-    ocr_engine_type: Literal["builtin", "api", "tesseract", "smart"] = Field(default="builtin", description="OCR引擎类型")
+    ocr_engine_type: Literal["builtin", "api", "tesseract", "smart", "auto"] = Field(default="auto", description="OCR引擎类型：auto=SmartOCR链式路由(推荐), smart=同auto, builtin=本地多引擎融合")
     ocr_api_config: Optional[Dict[str, Any]] = Field(default=None, description="外部OCR API配置")
     custom_model_config: Optional[Dict[str, Any]] = Field(default=None, description="运行时自定义模型配置，覆盖配置文件中的custom_engines")
 

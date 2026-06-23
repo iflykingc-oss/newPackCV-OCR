@@ -1,5 +1,17 @@
 {
     "ocr_engines": {
+        "unlimited_ocr": {
+            "mode": "disabled",
+            "endpoint": "",
+            "api_key": "",
+            "hf_token": "",
+            "model_id": "baidu/Unlimited-OCR",
+            "image_mode": "gundam",
+            "max_tokens": 32768,
+            "ngram_size": 35,
+            "ngram_window": 128,
+            "prompt": "<image>document parsing."
+        },
         "lighton_ocr": {
             "mode": "disabled",
             "endpoint": "",

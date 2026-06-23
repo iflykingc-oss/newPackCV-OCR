@@ -909,96 +909,15 @@ def post_process_ocr_results(
 
 
 def post_process_ocr_text(text: str) -> str:
-    """OCR文本后处理：去重、修复常见错误、校正词汇"""
-    if not text:
-        return text
+    """OCR文本后处理：过滤条码噪声 + 修复常见错误（委托独立模块）"""
+    from utils.ocr_postprocess import post_process_ocr_text as _pp
+    return _pp(text)
 
-    # 数字-字母混淆纠正（包装标签常见）
-    digit_corrections = {"O": "0", "o": "0", "l": "1", "I": "1", "S": "5", "B": "8"}
 
-    # 常见OCR错误词汇校正（包装场景）
-    word_corrections: Dict[str, str] = {
-        # English corrections
-        "Storrge": "Storage",
-        "storrge": "storage",
-        "Storge": "Storage",
-        "Storege": "Storage",
-        "Maufacturer": "Manufacturer",
-        "maufacturer": "manufacturer",
-        "Mantfacturer": "Manufacturer",
-        "Prodct": "Product",
-        "podct": "product",
-        "Specication": "Specification",
-        "Ingedients": "Ingredients",
-        "ingedients": "ingredients",
-        "Expir": "Expiry",
-        "Dtae": "Date",
-        "dtae": "date",
-        "Contet": "Content",
-        "contet": "content",
-        "Adress": "Address",
-        "adress": "address",
-        "YiHaijiaLi": "YiHaiJiaLi",
-        # Chinese common OCR corrections
-        "已期": "日期",
-        "日朋": "日期",
-        "月月": "月",
-        "曰": "日",
-        "末": "未",
-        "己": "已",
-        "配料表": "配料表",
-        "配科": "配料",
-        "食月油": "食用油",
-        "植物月旨": "植物脂", 
-        "添如剂": "添加剂",
-        "食品添如剂": "食品添加剂",
-        "净含世": "净含量",
-        "净含鲎": "净含量",
-        "上产曰期": "生产日期",
-        "上产厂商": "生产厂商",
-        "保质朋": "保质期",
-        "保质朞": "保质期",
-        "生产厂高": "生产厂商",
-        "阴京": "阴凉",
-        "阴京干燥": "阴凉干燥",
-        "储藏": "储藏",
-        "批身": "批次",
-        "批兮": "批次",
-    }
-
-    lines = text.split('\n')
-    lines = [line.strip() for line in lines if line.strip()]
-
-    # 去除重复行
-    seen: List[str] = []
-    unique_lines: List[str] = []
-    for line in lines:
-        if line not in seen:
-            seen.append(line)
-            unique_lines.append(line)
-
-    # 修复OCR错误
-    processed_lines: List[str] = []
-    for line in unique_lines:
-        # 1. 词汇级校正（先做，避免影响后续数字替换）
-        for wrong, correct in word_corrections.items():
-            if wrong in line:
-                line = line.replace(wrong, correct)
-
-        # 2. 数字校正（仅对包含数字的行做精细替换）
-        if re.search(r'\d{2,}', line):
-            for wrong, correct in digit_corrections.items():
-                # 数字前的字母混淆（如 O1 → 01）
-                line = re.sub(rf'(\d){re.escape(wrong)}', lambda m: m.group(1) + correct, line)
-                # 数字后的字母混淆（如 1O → 10）
-                line = re.sub(rf'{re.escape(wrong)}(\d)', lambda m: correct + m.group(1), line)
-
-        # 3. 清理多余空白
-        line = re.sub(r'\s{2,}', ' ', line)
-
-        processed_lines.append(line)
-
-    return "\n".join(processed_lines)
+def post_process_nutrition_table(text: str, image=None) -> str:
+    """营养成分表行列重排（委托独立模块，支持CV表格检测）"""
+    from utils.ocr_postprocess import post_process_nutrition_table as _pp
+    return _pp(text, image_path=None, image_array=image)
 
 
 # ==================== 主节点函数 ====================
@@ -1241,6 +1160,27 @@ def ocr_recognize_node(
     # 文本后处理
     if final_text:
         final_text = post_process_ocr_text(final_text)
+        # 传递原始图片给表格检测（优先用 original_img，fallback 到 img）
+        _table_img = original_img if 'original_img' in dir() else (img if 'img' in dir() else None)
+        final_text = post_process_nutrition_table(final_text, image=_table_img)
+
+    # LLM融合纠错：用已有doubao API对OCR结果做语义级纠错
+    if final_text and len(final_text.strip()) > 5:
+        try:
+            from utils.ocr_fusion import llm_correct_text
+            _before_len = len(final_text)
+            final_text = llm_correct_text(final_text, engine_name=engine or "rapidocr")
+            _after_len = len(final_text)
+            if _after_len != _before_len:
+                logger.info(f"LLM纠错: {_before_len}→{_after_len} chars")
+        except Exception as e:
+            logger.debug(f"LLM纠错跳过: {e}")
+
+    # VLM 辅助识别：置信度低或文本过短时，用 VL 模型重新识别
+    if final_text is not None:
+        from utils.ocr_postprocess import vlm_assisted_recognition
+        _vlm_img = original_img if 'original_img' in dir() else (img if 'img' in dir() else None)
+        final_text = vlm_assisted_recognition(_vlm_img, final_text, final_conf)
 
     elapsed_time = time.time() - start_time
     logger.info(f"OCR完成: 引擎={engine}, 耗时={elapsed_time:.2f}s, 文本长度={len(final_text)}, 置信度={final_conf:.4f}")
