@@ -5,6 +5,22 @@ All notable changes to PackCV-OCR will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.1.1] - 2025-07
+
+### Added
+- 整合远程V6.1代码(ocr_fusion/ocr_postprocess/table_detector/unlimited_ocr工具层)
+- V6.0+V6.1全节点整合到graph.py(23节点完整拓扑)
+- 图片路径4路并行: OCR+VL+条码+印章→multi_channel_fusion汇聚
+- 文档路径: MinerU→场景LLM提取→直出结果
+- 条件QA触发(仅user_question非空时调用qa_answer)
+- input_router自动判断图片/文档→不同处理管线
+
+### Fixed
+- _SCENARIO_LLM_MAP定义恢复(远程V6.1覆盖丢失)
+- tests/__init__.py旧import清理
+- barcode_detect/stamp_detect独立节点归档(已合并到fusion内部)
+- package_image类型改为非Optional(消除LSP类型不匹配)
+
 ## [6.0.0] - 2025-07
 
 ### Added

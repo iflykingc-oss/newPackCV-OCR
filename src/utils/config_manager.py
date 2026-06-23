@@ -13,6 +13,18 @@ import threading
 from typing import Dict, Any, Optional, List
 from datetime import datetime
 
+# 场景→LLM配置映射表
+_SCENARIO_LLM_MAP: Dict[str, str] = {
+    "packaging": "model_extract",
+    "finance_receipt": "finance_extract",
+    "finance_statement": "finance_statement",
+    "pharmaceutical": "pharma_extract",
+    "contract": "contract_extract",
+    "id_card": "id_card_extract",
+    "logistics": "logistics_extract",
+    "general_document": "general_extract",
+}
+
 logger = logging.getLogger("config_manager")
 
 _DEFAULT_DB_PATH = os.path.join(
