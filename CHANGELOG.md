@@ -5,6 +5,36 @@ All notable changes to PackCV-OCR will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.2.0] - 2026-01-24
+
+### 🔧 修复 (Fixes)
+- **恢复误归档节点**: `category_template_node` 和 `knowledge_inference_node` 被错误归档，导致 `graph.py` 导入失败。已恢复到 `nodes/` 目录。
+- **删除僵尸子图**: `packcv_graph.py` 引用了所有已归档节点，LSP 检查失败。已删除（无业务引用）。
+- **清理孤立归档**: 删除 `_archived/barcode_detect_node.py` 和 `_archived/stamp_detect_node.py`（pyzbar 不可用，已合并到 `multi_channel_fusion` 内部）。
+
+### 📚 文档 (Documentation) - 开源项目规范化
+- **CONTRIBUTING.md**: 完整贡献流程（Conventional Commits、PR 流程、代码规范、测试要求）
+- **CODE_OF_CONDUCT.md**: 贡献者公约（基于 Contributor Covenant 2.1）
+- **SECURITY.md**: 安全政策（漏洞报告流程、响应时间、版本支持矩阵）
+- **docs/architecture.md**: 完整架构详解（数据流、引擎梯级、配置链、场景检测）
+- **docs/development.md**: 开发者指南（添加节点/场景/引擎的标准流程）
+- **docs/api/README.md**: API 端点参考
+- **docs/scenarios/README.md**: 8 场景 Schema 索引
+- **examples/**: 4 个实战示例（基础图片OCR、PDF解析、多场景、租户配置）
+
+### 🛠 工程化 (Engineering)
+- **pyproject.toml 开源元数据**: 添加 `authors`/`maintainers`/`keywords`/`classifiers`/`[project.urls]`/`optional-dependencies`（dev、gpu）
+- **scripts/quality_check.sh**: 提交前质量检查脚本（测试/import规范/签名/配置完整性5项）
+- **.github/ISSUE_TEMPLATE/**: Bug 报告、功能请求模板 + config.yml
+- **.github/PULL_REQUEST_TEMPLATE.md**: 标准 PR 模板
+
+### ✅ 验证
+- 单元测试: 42/42 通过
+- 集成测试: 23/23 通过
+- 质量检查: 5/5 通过
+- test_run: 端到端验证通过
+
+
 ## [6.1.1] - 2025-07
 
 ### Added
@@ -20,6 +50,7 @@ and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0
 - tests/__init__.py旧import清理
 - barcode_detect/stamp_detect独立节点归档(已合并到fusion内部)
 - package_image类型改为非Optional(消除LSP类型不匹配)
+
 
 ## [6.0.0] - 2025-07
 

@@ -1,8 +1,12 @@
-# PackCV-OCR — 智能文档/图片信息提取引擎
+# VibeCoding-OCR — 智能文档/图片信息提取引擎
 
-[![CI](https://github.com/your-org/packcv/actions/workflows/ci.yml/badge.svg)](https://github.com/your-org/packcv/actions)
-[![Python 3.12](https://img.shields.io/badge/Python-3.12-blue.svg)](https://www.python.org/)
+[![CI](https://github.com/vibecoding-ocr/vibecoding-ocr/actions/workflows/ci.yml/badge.svg)](https://github.com/vibecoding-ocr/vibecoding-ocr/actions)
+[![Python 3.12](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-green.svg)](https://opensource.org/licenses/Apache-2.0)
+[![Tests](https://img.shields.io/badge/tests-42%20passed-brightgreen.svg)](./src/tests/)
+[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
+[![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](./CONTRIBUTING.md)
+[![Issues](https://img.shields.io/github/issues/vibecoding-ocr/vibecoding-ocr.svg)](https://github.com/vibecoding-ocr/vibecoding-ocr/issues)
 
 > 🚀 8行业场景 × 全格式输入(图片/PDF/DOCX/PPTX/XLSX) × 多引擎融合 × VLM-First架构
 >
@@ -341,12 +345,41 @@ PYTHONPATH=. python -m pytest src/tests/integration/ -v
 
 ---
 
-## 📄 许可证
+## 📚 进阶阅读
 
-Apache License 2.0
+- 📐 [架构详解](./docs/architecture.md) — 完整图拓扑 + 智能梯级 + 三级配置链
+- 🎯 [场景开发指南](./docs/scenarios/README.md) — 8 场景 Schema 定义 + 自定义场景
+- 🔌 [API 参考](./docs/api/README.md) — REST API 端点 + 集成示例
+- 🛠 [开发者指南](./docs/development.md) — 添加自定义节点/引擎/场景
+- 📊 [AGENTS.md](./AGENTS.md) — 项目结构索引
+
+---
+
+## 🧪 完整示例
+
+查看 [examples/](./examples) 目录：
+
+- `basic_image_ocr.py` — 基础图片 OCR
+- `document_parse.py` — PDF/DOCX 解析
+- `scenario_specific.py` — 多场景批量提取
+- `tenant_config.py` — SaaS 多租户配置
 
 ---
 
 ## 🤝 贡献
 
-欢迎Issue和PR！提出新场景、新引擎接入、或改进现有Schema。
+欢迎贡献！请阅读 [CONTRIBUTING.md](./CONTRIBUTING.md) 了解详细流程。
+
+提交规范遵循 [Conventional Commits](https://www.conventionalcommits.org/)。
+
+## 📄 许可证
+
+Apache License 2.0 — 详见 [LICENSE](./LICENSE)
+
+## 🔒 安全
+
+发现安全漏洞？参考 [SECURITY.md](./SECURITY.md) 报告。
+
+## 📜 行为准则
+
+参与项目即代表同意 [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)。

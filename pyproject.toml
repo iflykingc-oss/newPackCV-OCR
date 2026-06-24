@@ -1,9 +1,30 @@
 [project]
-name = "vibe-coding"
-version = "0.1.0"
-description = "Coze Vibe Coding project"
+name = "vibecoding-ocr"
+version = "6.1.1"
+description = "VibeCoding-OCR: 8场景多模态OCR + MinerU全格式文档解析 + VLM-First架构 + 三级配置链(开源OCR工作流引擎)"
+readme = "README.md"
+license = { file = "LICENSE" }
+authors = [
+    { name = "VibeCoding Team", email = "team@vibecoding.dev" }
+]
+maintainers = [
+    { name = "VibeCoding Team", email = "team@vibecoding.dev" }
+]
+keywords = ["ocr", "document-ai", "vlm", "multimodal", "langgraph", "mineru", "paddleocr", "extraction", "vision-language-model", "packaging", "finance", "pharmaceutical", "id-card", "contract", "logistics"]
+classifiers = [
+    "Development Status :: 4 - Beta",
+    "Intended Audience :: Developers",
+    "Intended Audience :: Information Technology",
+    "License :: OSI Approved :: Apache Software License",
+    "Operating System :: OS Independent",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Scientific/Engineering :: Artificial Intelligence",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
 requires-python = ">=3.12"
 dependencies = [
+
     "langchain==1.0.3",
     "langchain-openai==1.0.1",
     "langgraph==1.0.2",
@@ -49,6 +70,28 @@ dependencies = [
     "langchain-text-splitters>=1.1.2",
     "rapidocr-onnxruntime>=1.4.4",
     "easyocr>=1.7.2",
+]
+
+[project.urls]
+Homepage = "https://github.com/vibecoding-ocr/vibecoding-ocr"
+Repository = "https://github.com/vibecoding-ocr/vibecoding-ocr"
+Issues = "https://github.com/vibecoding-ocr/vibecoding-ocr/issues"
+Changelog = "https://github.com/vibecoding-ocr/vibecoding-ocr/blob/main/CHANGELOG.md"
+Documentation = "https://github.com/vibecoding-ocr/vibecoding-ocr/blob/main/AGENTS.md"
+
+[project.optional-dependencies]
+dev = [
+    "pytest>=8.0",
+    "pytest-cov>=4.0",
+    "pytest-asyncio>=0.21",
+    "pyright>=1.1.300",
+    "ruff>=0.1.0",
+    "black>=23.0",
+    "isort>=5.12",
+]
+gpu = [
+    "torch>=2.0",
+    "torchvision>=0.15",
 ]
 
 [tool.uv]
