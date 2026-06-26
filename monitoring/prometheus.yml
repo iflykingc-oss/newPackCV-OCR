@@ -1,0 +1,77 @@
+# ===================================================================
+# Prometheus 抓取配置
+# ===================================================================
+global:
+  scrape_interval: 15s
+  evaluation_interval: 15s
+  external_labels:
+    cluster: packcv-prod
+    environment: production
+
+# 加载告警规则
+rule_files:
+  - "alert_rules.yml"
+
+# 告警管理器
+alerting:
+  alertmanagers:
+    - static_configs:
+        - targets: ["alertmanager:9093"]
+
+# ============================================================
+# 抓取目标
+# ============================================================
+scrape_configs:
+  # Prometheus 自身
+  - job_name: "prometheus"
+    static_configs:
+      - targets: ["localhost:9090"]
+
+  # PackCV-OCR API × 3
+  - job_name: "packcv-api"
+    metrics_path: "/metrics"
+    static_configs:
+      - targets:
+          - "api-1:9001"
+          - "api-2:9001"
+          - "api-3:9001"
+        labels:
+          service: packcv-api
+          tier: production
+
+  # Redis Exporter (可选)
+  - job_name: "redis"
+    static_configs:
+      - targets: ["redis-exporter:9121"]
+        labels:
+          service: redis
+
+  # PostgreSQL Exporter (可选)
+  - job_name: "postgres"
+    static_configs:
+      - targets: ["postgres-exporter:9187"]
+        labels:
+          service: postgres
+
+  # Nginx Exporter (可选)
+  - job_name: "nginx"
+    static_configs:
+      - targets: ["nginx-exporter:9113"]
+        labels:
+          service: nginx
+
+  # 节点监控（可选，部署node-exporter后启用）
+  - job_name: "node"
+    static_configs:
+      - targets: ["node-exporter:9100"]
+        labels:
+          service: node
+
+# ============================================================
+# 远程写入（可选，推送到云端）
+# remote_write:
+#   - url: "https://prometheus-remote-write.example.com/api/v1/write"
+#     basic_auth:
+#       username: "xxx"
+#       password: "xxx"
+# ============================================================

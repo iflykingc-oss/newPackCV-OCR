@@ -1,0 +1,30 @@
+# ===================================================================
+# Nginx 反向代理 (生产) - 含SSL配置
+# ===================================================================
+version: '3.8'
+
+services:
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: packcv-nginx
+    restart: unless-stopped
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+    ports:
+      - "80:80"
+      - "443:443"
+    networks:
+      - packcv-net
+    depends_on:
+      - packcv-api
+    healthcheck:
+      test: ["CMD", "wget", "-q", "--spider", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+
+networks:
+  packcv-net:
+    external: true
+    name: packcv-net

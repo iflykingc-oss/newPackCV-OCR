@@ -1,168 +1,161 @@
-"""Redis 客户端模块 (Phase 5 兼容层)
+"""Redis客户端封装 - 多租户隔离存储
 
-提供统一的 Redis 客户端入口,支持:
-- 单机 Redis (默认)
-- 集群 Redis
-- 内存 Mock (降级,无 Redis 时使用)
-- 异步 API
-
-设计原则:
-- 默认返回内存 mock,保证系统可启动
-- 生产环境通过 REDIS_URL 环境变量启用真实 Redis
-- 异步 API 与 redis-py 兼容
+提供：
+- 单例Redis连接池
+- 租户命名空间隔离
+- 常用操作封装（限流、计数、缓存）
 """
+
 import os
-import asyncio
-import logging
-import time
-from typing import Any, Optional, Dict, List, Union
-from threading import Lock
+from typing import Any, Optional
 
-logger = logging.getLogger(__name__)
+import redis
+from redis.connection import ConnectionPool
 
 
-class InMemoryRedisMock:
-    """内存版 Redis Mock,用于无 Redis 时的开发/测试环境"""
+class TenantRedisClient:
+    """多租户Redis客户端
 
-    def __init__(self) -> None:
-        self._store: Dict[str, str] = {}
-        self._expire: Dict[str, float] = {}
-        self._lock = Lock()
+    所有Key自动加上namespace前缀，实现租户间数据隔离
+    """
 
-    def get(self, key: str) -> Optional[str]:
-        with self._lock:
-            self._cleanup_expired(key)
-            return self._store.get(key)
+    _instance: Optional["TenantRedisClient"] = None
+    _pool: Optional[ConnectionPool] = None
 
-    def set(self, key: str, value: str, ex: Optional[int] = None) -> bool:
-        with self._lock:
-            self._store[key] = str(value)
-            if ex is not None:
-                self._expire[key] = time.time() + ex
-            return True
+    def __new__(cls) -> "TenantRedisClient":
+        if cls._instance is None:
+            cls._instance = super().__new__(cls)
+            cls._init_pool()
+        return cls._instance
 
-    def setex(self, key: str, time_sec: int, value: str) -> bool:
-        return self.set(key, value, ex=time_sec)
+    @classmethod
+    def _init_pool(cls) -> None:
+        """初始化连接池（单例）"""
+        redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
+        max_connections = int(os.getenv("REDIS_MAX_CONNECTIONS", "50"))
+        socket_timeout = float(os.getenv("REDIS_SOCKET_TIMEOUT", "5"))
 
-    def delete(self, *keys: str) -> int:
-        with self._lock:
-            count = 0
-            for key in keys:
-                if key in self._store:
-                    del self._store[key]
-                    if key in self._expire:
-                        del self._expire[key]
-                    count += 1
-            return count
-
-    def exists(self, key: str) -> bool:
-        with self._lock:
-            self._cleanup_expired(key)
-            return key in self._store
-
-    def incr(self, key: str, amount: int = 1) -> int:
-        with self._lock:
-            self._cleanup_expired(key)
-            current = int(self._store.get(key, "0"))
-            new_value = current + amount
-            self._store[key] = str(new_value)
-            return new_value
-
-    def expire(self, key: str, time_sec: int) -> bool:
-        with self._lock:
-            if key in self._store:
-                self._expire[key] = time.time() + time_sec
-                return True
-            return False
-
-    def keys(self, pattern: str = "*") -> List[str]:
-        import fnmatch
-        with self._lock:
-            self._cleanup_all_expired()
-            return [k for k in self._store.keys() if fnmatch.fnmatch(k, pattern)]
-
-    def ping(self) -> bool:
-        return True
-
-    def info(self) -> Dict[str, Any]:
-        with self._lock:
-            return {
-                "redis_version": "mock-1.0.0",
-                "connected_clients": 1,
-                "used_memory": len(self._store) * 64,
-                "total_keys": len(self._store),
-            }
-
-    def _cleanup_expired(self, key: str) -> None:
-        if key in self._expire and time.time() > self._expire[key]:
-            del self._store[key]
-            if key in self._expire:
-                del self._expire[key]
-
-    def _cleanup_all_expired(self) -> None:
-        now = time.time()
-        expired_keys = [k for k, exp in self._expire.items() if now > exp]
-        for key in expired_keys:
-            self._store.pop(key, None)
-            self._expire.pop(key, None)
-
-    # 异步 API 兼容
-    async def aget(self, key: str) -> Optional[str]:
-        return self.get(key)
-
-    async def aset(self, key: str, value: str, ex: Optional[int] = None) -> bool:
-        return self.set(key, value, ex=ex)
-
-    async def adelete(self, *keys: str) -> int:
-        return self.delete(*keys)
-
-
-class RedisClient:
-    """Redis 客户端统一入口"""
-
-    def __init__(self, url: Optional[str] = None) -> None:
-        self.url = url or os.getenv("REDIS_URL", "")
-        self._client: Optional[Any] = None
-        self._is_mock = False
-        self._init_client()
-
-    def _init_client(self) -> None:
-        if not self.url:
-            logger.info("REDIS_URL not set, using in-memory mock")
-            self._client = InMemoryRedisMock()
-            self._is_mock = True
-            return
-        try:
-            import redis  # type: ignore
-            self._client = redis.Redis.from_url(self.url, decode_responses=True)
-            self._client.ping()
-            logger.info("Redis connected: %s", self.url.split("@")[-1])
-        except Exception as exc:  # noqa: BLE001
-            logger.warning("Redis connection failed (%s), falling back to in-memory mock", exc)
-            self._client = InMemoryRedisMock()
-            self._is_mock = True
+        cls._pool = ConnectionPool.from_url(
+            redis_url,
+            max_connections=max_connections,
+            socket_timeout=socket_timeout,
+            socket_connect_timeout=socket_timeout,
+            decode_responses=True,
+        )
 
     @property
-    def is_mock(self) -> bool:
-        return self._is_mock
+    def client(self) -> redis.Redis:
+        """获取Redis客户端"""
+        if self._pool is None:
+            self._init_pool()
+        return redis.Redis(connection_pool=self._pool)
 
-    def __getattr__(self, item: str) -> Any:
-        if self._client is None:
-            raise RuntimeError("Redis client not initialized")
-        return getattr(self._client, item)
+    def namespaced_key(self, namespace: str, key: str) -> str:
+        """生成租户命名空间Key
+
+        Args:
+            namespace: 租户命名空间
+            key: 原始Key
+
+        Returns:
+            命名空间Key，格式: packcv:{namespace}:{key}
+        """
+        return f"packcv:{namespace}:{key}"
+
+    def get(self, namespace: str, key: str) -> Optional[str]:
+        """读取（带命名空间）"""
+        full_key = self.namespaced_key(namespace, key)
+        return self.client.get(full_key)
+
+    def set(
+        self,
+        namespace: str,
+        key: str,
+        value: Any,
+        ex: Optional[int] = None,
+    ) -> bool:
+        """写入（带命名空间）
+
+        Args:
+            namespace: 租户命名空间
+            key: 键
+            value: 值（自动str转换）
+            ex: 过期时间（秒）
+        """
+        full_key = self.namespaced_key(namespace, key)
+        return bool(self.client.set(full_key, str(value), ex=ex))
+
+    def incr(self, namespace: str, key: str, amount: int = 1) -> int:
+        """自增（带命名空间）"""
+        full_key = self.namespaced_key(namespace, key)
+        return int(self.client.incrby(full_key, amount))
+
+    def hincrby(
+        self, namespace: str, key: str, field: str, amount: int = 1
+    ) -> int:
+        """Hash自增"""
+        full_key = self.namespaced_key(namespace, key)
+        return int(self.client.hincrby(full_key, field, amount))
+
+    def hincrbyfloat(
+        self, namespace: str, key: str, field: str, amount: float
+    ) -> float:
+        """Hash自增浮点"""
+        full_key = self.namespaced_key(namespace, key)
+        return float(self.client.hincrbyfloat(full_key, field, amount))
+
+    def hgetall(self, namespace: str, key: str) -> dict:
+        """读取Hash全部"""
+        full_key = self.namespaced_key(namespace, key)
+        return self.client.hgetall(full_key)
+
+    def delete(self, namespace: str, *keys: str) -> int:
+        """删除（带命名空间）"""
+        full_keys = [self.namespaced_key(namespace, k) for k in keys]
+        return int(self.client.delete(*full_keys))
+
+    def expire(self, namespace: str, key: str, seconds: int) -> bool:
+        """设置过期"""
+        full_key = self.namespaced_key(namespace, key)
+        return bool(self.client.expire(full_key, seconds))
+
+    def exists(self, namespace: str, key: str) -> bool:
+        """判断Key是否存在"""
+        full_key = self.namespaced_key(namespace, key)
+        return bool(self.client.exists(full_key))
+
+    def eval_script(
+        self, script: str, namespace: str, num_keys: int, *args
+    ) -> Any:
+        """执行Lua脚本（自动加namespace前缀到KEYS）"""
+        full_keys = [
+            self.namespaced_key(namespace, k) for k in args[:num_keys]
+        ]
+        # 剩余的是ARGV
+        argv = args[num_keys:]
+        return self.client.eval(script, num_keys, *full_keys, *argv)
+
+    def load_script(self, script: str) -> str:
+        """加载Lua脚本并返回SHA"""
+        return self.client.script_load(script)
+
+    def evalsha(
+        self, sha: str, namespace: str, num_keys: int, *args
+    ) -> Any:
+        """通过SHA执行Lua脚本"""
+        full_keys = [
+            self.namespaced_key(namespace, k) for k in args[:num_keys]
+        ]
+        argv = args[num_keys:]
+        return self.client.evalsha(sha, num_keys, *full_keys, *argv)
+
+    def health_check(self) -> bool:
+        """健康检查"""
+        try:
+            return bool(self.client.ping())
+        except Exception:
+            return False
 
 
 # 全局单例
-_redis_client: Optional[RedisClient] = None
-
-
-def get_redis_client() -> RedisClient:
-    """获取全局 Redis 客户端 (单例)"""
-    global _redis_client
-    if _redis_client is None:
-        _redis_client = RedisClient()
-    return _redis_client
-
-
-# 兼容直接 import 的用法
-redis_client = get_redis_client()
+redis_client = TenantRedisClient()

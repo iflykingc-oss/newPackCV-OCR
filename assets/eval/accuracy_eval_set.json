@@ -1,0 +1,120 @@
+{
+  "version": "1.0.0",
+  "created_at": "2026-07-15",
+  "description": "PackCV-OCR 准确率评测集 - 用于回归测试和性能基准",
+  "total_cases": 16,
+  "scenarios": {
+    "packaging": {
+      "test_cases": [
+        {
+          "case_id": "pkg_001_zh",
+          "language": "zh-CN",
+          "input_file": "https://assets.example.com/test/packaging_cn_01.png",
+          "expected_fields": {
+            "product_name": "非空字符串",
+            "brand": "非空字符串",
+            "specification": "非空字符串",
+            "production_date": "YYYY-MM-DD格式"
+          },
+          "accuracy_threshold": 0.95
+        },
+        {
+          "case_id": "pkg_002_en",
+          "language": "en",
+          "input_file": "https://assets.example.com/test/packaging_en_01.png",
+          "expected_fields": {
+            "product_name": "non-empty string",
+            "brand": "non-empty string"
+          },
+          "accuracy_threshold": 0.92
+        },
+        {
+          "case_id": "pkg_003_th",
+          "language": "th",
+          "input_file": "https://assets.example.com/test/packaging_th_01.png",
+          "expected_fields": {
+            "product_name": "non-empty string"
+          },
+          "accuracy_threshold": 0.85
+        }
+      ]
+    },
+    "finance_receipt": {
+      "test_cases": [
+        {
+          "case_id": "fin_001_zh",
+          "language": "zh-CN",
+          "input_file": "https://assets.example.com/test/invoice_cn_01.png",
+          "expected_fields": {
+            "invoice_number": "8位数字",
+            "amount": "浮点数>0",
+            "issue_date": "YYYY-MM-DD"
+          },
+          "accuracy_threshold": 0.98
+        },
+        {
+          "case_id": "fin_002_en",
+          "language": "en",
+          "input_file": "https://assets.example.com/test/receipt_en_01.png",
+          "expected_fields": {
+            "amount": "float>0"
+          },
+          "accuracy_threshold": 0.95
+        }
+      ]
+    },
+    "contract": {
+      "test_cases": [
+        {
+          "case_id": "ctr_001_zh",
+          "language": "zh-CN",
+          "input_file": "https://assets.example.com/test/contract_cn_01.png",
+          "expected_fields": {
+            "contract_number": "非空字符串",
+            "party_a": "非空字符串",
+            "party_b": "非空字符串",
+            "amount": "浮点数>0"
+          },
+          "accuracy_threshold": 0.93
+        },
+        {
+          "case_id": "ctr_002_vi",
+          "language": "vi",
+          "input_file": "https://assets.example.com/test/contract_vi_01.png",
+          "expected_fields": {
+            "party_a": "non-empty string"
+          },
+          "accuracy_threshold": 0.85
+        }
+      ]
+    },
+    "id_card": {
+      "test_cases": [
+        {
+          "case_id": "idc_001_zh",
+          "language": "zh-CN",
+          "input_file": "https://assets.example.com/test/idcard_cn_01.png",
+          "expected_fields": {
+            "name": "非空字符串",
+            "id_number": "18位身份证号",
+            "birth_date": "YYYY-MM-DD"
+          },
+          "accuracy_threshold": 0.98
+        }
+      ]
+    }
+  },
+  "evaluation_metrics": {
+    "field_accuracy": "每个字段正确率",
+    "scenario_accuracy": "场景分类正确率",
+    "overall_accuracy": "整体加权平均",
+    "latency_p50": "P50延迟<2s",
+    "latency_p95": "P95延迟<5s",
+    "cost_per_request": "<$0.01"
+  },
+  "regression_threshold": {
+    "field_accuracy_drop": 0.05,
+    "scenario_accuracy_drop": 0.03,
+    "latency_p95_increase": 0.5
+  }
+}

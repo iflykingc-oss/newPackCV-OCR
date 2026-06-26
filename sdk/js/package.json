@@ -1,0 +1,61 @@
+{
+  "name": "@packcv-ocr/sdk",
+  "version": "1.0.0",
+  "description": "PackCV-OCR 多租户文档智能提取服务 - JavaScript/TypeScript 客户端",
+  "license": "MIT",
+  "author": "PackCV Team <team@packcv-ocr.io>",
+  "homepage": "https://github.com/packcv-ocr/packcv-ocr-js#readme",
+  "repository": {
+    "type": "git",
+    "url": "https://github.com/packcv-ocr/packcv-ocr-js.git"
+  },
+  "bugs": {
+    "url": "https://github.com/packcv-ocr/packcv-ocr-js/issues"
+  },
+  "keywords": [
+    "ocr",
+    "document-ai",
+    "multi-tenant",
+    "api-client",
+    "langgraph",
+    "typescript"
+  ],
+  "main": "./dist/index.cjs",
+  "module": "./dist/index.mjs",
+  "types": "./dist/index.d.ts",
+  "exports": {
+    ".": {
+      "types": "./dist/index.d.ts",
+      "import": "./dist/index.mjs",
+      "require": "./dist/index.cjs",
+      "browser": "./dist/browser.mjs"
+    }
+  },
+  "files": [
+    "dist",
+    "README.md",
+    "LICENSE"
+  ],
+  "scripts": {
+    "build": "tsup src/index.ts --format cjs,esm --dts --clean",
+    "build:browser": "tsup src/browser.ts --format esm --clean",
+    "test": "vitest run",
+    "test:watch": "vitest",
+    "lint": "eslint src --ext .ts",
+    "typecheck": "tsc --noEmit"
+  },
+  "dependencies": {
+    "node-fetch": "^2.7.0"
+  },
+  "devDependencies": {
+    "@types/node": "^20.11.0",
+    "@types/node-fetch": "^2.6.11",
+    "tsup": "^8.0.2",
+    "typescript": "^5.4.0",
+    "vitest": "^1.4.0"
+  },
+  "engines": {
+    "node": ">=16.0.0"
+  },
+  "sideEffects": false
+}

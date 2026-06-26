@@ -1,0 +1,189 @@
+# ===================================================================
+# Prometheus 告警规则
+# 涵盖: API可用性/性能/限流/计费/工作流/系统资源
+# ===================================================================
+
+groups:
+  # ============================================================
+  # 1. API 可用性
+  # ============================================================
+  - name: api_availability
+    interval: 30s
+    rules:
+      - alert: APIHighErrorRate
+        expr: |
+          (
+            sum(rate(packcv_api_requests_total{status=~"5.."}[5m]))
+            /
+            sum(rate(packcv_api_requests_total[5m]))
+          ) > 0.05
+        for: 5m
+        labels:
+          severity: critical
+          team: backend
+        annotations:
+          summary: "API错误率超过5%"
+          description: "过去5分钟内API 5xx错误率为 {{ $value | humanizePercentage }}"
+
+      - alert: APIDown
+        expr: up{job="packcv-api"} == 0
+        for: 2m
+        labels:
+          severity: critical
+          team: backend
+        annotations:
+          summary: "API实例宕机"
+          description: "实例 {{ $labels.instance }} 已宕机超过2分钟"
+
+      - alert: APIHighLatency
+        expr: |
+          histogram_quantile(0.95, rate(packcv_api_request_latency_seconds_bucket[5m])) > 5
+        for: 10m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "API P95延迟超过5秒"
+          description: "端点 {{ $labels.endpoint }} P95延迟为 {{ $value }}秒"
+
+  # ============================================================
+  # 2. 限流
+  # ============================================================
+  - name: rate_limiting
+    interval: 30s
+    rules:
+      - alert: RateLimitHitsHigh
+        expr: |
+          sum(rate(packcv_rate_limit_hits_total[5m])) > 10
+        for: 5m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "限流命中次数激增"
+          description: "过去5分钟限流命中 {{ $value }} 次，可能存在流量突增或配额设置过低"
+
+      - alert: TenantQuotaExhausted
+        expr: |
+          (
+            packcv_billing_tokens_total
+            /
+            on(tenant_id) group_left
+            (packcv_tenants_total{status="active"} * 1000000)
+          ) > 0.9
+        for: 10m
+        labels:
+          severity: warning
+          team: customer-success
+        annotations:
+          summary: "租户配额即将耗尽"
+          description: "租户 {{ $labels.tenant_id }} 已使用 {{ $value | humanizePercentage }} 配额"
+
+  # ============================================================
+  # 3. 计费
+  # ============================================================
+  - name: billing
+    interval: 60s
+    rules:
+      - alert: BillingCostAnomaly
+        expr: |
+          (
+            rate(packcv_billing_cost_usd_total[1h])
+            >
+            2 * rate(packcv_billing_cost_usd_total[24h] offset 1d)
+          )
+        for: 30m
+        labels:
+          severity: warning
+          team: finance
+        annotations:
+          summary: "计费成本异常增长"
+          description: "过去1小时成本是昨日同时段的 {{ $value }} 倍，请检查是否存在异常调用"
+
+  # ============================================================
+  # 4. 降级/熔断
+  # ============================================================
+  - name: fallback
+    interval: 30s
+    rules:
+      - alert: ModelFallbackHigh
+        expr: |
+          (
+            sum(rate(packcv_fallback_triggers_total[10m]))
+            /
+            sum(rate(packcv_workflow_executions_total[10m]))
+          ) > 0.2
+        for: 10m
+        labels:
+          severity: warning
+          team: backend
+        annotations:
+          summary: "模型降级比例过高"
+          description: "过去10分钟有 {{ $value | humanizePercentage }} 的工作流触发了模型降级"
+
+      - alert: CircuitBreakerOpen
+        expr: packcv_circuit_breaker_state == 1
+        for: 5m
+        labels:
+          severity: critical
+          team: backend
+        annotations:
+          summary: "熔断器打开"
+          description: "模型 {{ $labels.model }} 熔断器已打开超过5分钟"
+
+  # ============================================================
+  # 5. 系统资源
+  # ============================================================
+  - name: system_resources
+    interval: 30s
+    rules:
+      - alert: HighCPUUsage
+        expr: 100 - (avg by(instance) (rate(node_cpu_seconds_total{mode="idle"}[5m])) * 100) > 80
+        for: 10m
+        labels:
+          severity: warning
+          team: ops
+        annotations:
+          summary: "CPU使用率超过80%"
+          description: "实例 {{ $labels.instance }} CPU使用率 {{ $value | humanize }}%"
+
+      - alert: HighMemoryUsage
+        expr: (1 - (node_memory_MemAvailable_bytes / node_memory_MemTotal_bytes)) * 100 > 85
+        for: 10m
+        labels:
+          severity: warning
+          team: ops
+        annotations:
+          summary: "内存使用率超过85%"
+          description: "实例 {{ $labels.instance }} 内存使用率 {{ $value | humanize }}%"
+
+      - alert: DiskSpaceLow
+        expr: (1 - (node_filesystem_avail_bytes{fstype!="tmpfs"} / node_filesystem_size_bytes{fstype!="tmpfs"})) * 100 > 80
+        for: 10m
+        labels:
+          severity: warning
+          team: ops
+        annotations:
+          summary: "磁盘空间不足"
+          description: "实例 {{ $labels.instance }} 挂载点 {{ $labels.mountpoint }} 磁盘使用率 {{ $value | humanize }}%"
+
+  # ============================================================
+  # 6. SLA (99.9%)
+  # ============================================================
+  - name: sla
+    interval: 60s
+    rules:
+      - alert: SLABreach
+        expr: |
+          (
+            sum(rate(packcv_api_requests_total{status=~"5.."}[1h]))
+            /
+            sum(rate(packcv_api_requests_total[1h]))
+          ) > 0.001
+        for: 30m
+        labels:
+          severity: critical
+          team: ops
+        annotations:
+          summary: "SLA 99.9% 受到威胁"
+          description: "过去1小时错误率 {{ $value | humanizePercentage }}，超出SLA允许的0.1%"

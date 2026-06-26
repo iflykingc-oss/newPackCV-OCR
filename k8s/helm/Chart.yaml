@@ -1,0 +1,17 @@
+apiVersion: v2
+name: packcv-ocr
+description: PackCV-OCR 多租户文档智能提取服务
+type: application
+version: 1.0.0
+appVersion: "7.0.0"
+keywords:
+  - ocr
+  - document-ai
+  - multi-tenant
+  - langgraph
+home: https://github.com/packcv-ocr/packcv-ocr
+sources:
+  - https://github.com/packcv-ocr/packcv-ocr
+maintainers:
+  - name: PackCV Team
+    email: team@packcv-ocr.io

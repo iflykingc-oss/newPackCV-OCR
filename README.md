@@ -1,46 +1,14 @@
 # VibeCoding-OCR — 智能文档/图片信息提取引擎
 
-[![CI](https://github.com/vibecoding-ocr/vibecoding-ocr/actions/workflows/ci.yml/badge.svg)](https://github.com/vibecoding-ocr/vibecoding-ocr/actions)
+[![CI](https://github.com/iflykingc-oss/newPackCV-OCR/actions/workflows/ci.yml/badge.svg)](https://github.com/iflykingc-oss/newPackCV-OCR/actions)
 [![Python 3.12](https://img.shields.io/badge/Python-3.12+-blue.svg)](https://www.python.org/downloads/)
 [![License: Apache 2.0](https://img.shields.io/badge/License-Apache%202.0-green.svg)](https://opensource.org/licenses/Apache-2.0)
-[![Tests](https://img.shields.io/badge/tests-42%20passed-brightgreen.svg)](./src/tests/)
-[![Code style: ruff](https://img.shields.io/badge/code%20style-ruff-000000.svg)](https://github.com/astral-sh/ruff)
+[![Tests](https://img.shields.io/badge/tests-22%20passed-brightgreen.svg)](./src/tests/)
 [![PRs Welcome](https://img.shields.io/badge/PRs-welcome-brightgreen.svg)](./CONTRIBUTING.md)
-[![Issues](https://img.shields.io/github/issues/vibecoding-ocr/vibecoding-ocr.svg)](https://github.com/vibecoding-ocr/vibecoding-ocr/issues)
 
-> 🚀 8行业场景 × 全格式输入(图片/PDF/DOCX/PPTX/XLSX) × 多引擎融合 × VLM-First架构
+> 🚀 8行业场景 × 全格式输入(图片/PDF/DOCX/PPTX/XLSX) × 多引擎融合 × VLM-First架构 × Phase 7功能优化
 >
 > 从图片和文档中提取结构化信息，覆盖包装、金融票据、银行流水、医药、合同、证件、物流、通用文档 8 大行业场景。
-
----
-
-## 💡 为什么选择 VibeCoding-OCR？
-
-| 我们的优势 | 竞品对比 |
-|----------|---------|
-| 🎯 **8 大行业场景开箱即用** | 多数 OCR 厂商只做通用文字,场景需自建 |
-| 🔄 **多引擎智能梯级** | 单一引擎故障即宕机,我们 4 级降级保障 99.95% SLA |
-| 🧠 **VLM-First 架构** | 传统 OCR 只能识别字符,VL 理解业务语义 |
-| 📊 **结构化字段输出** | OCR 输出非结构化文本,我们输出 JSON 业务字段 |
-| 🌍 **109 种语言** | 主流厂商支持 50-80 种 |
-| 🔌 **全格式输入** | 图片/PDF/DOCX/PPTX/XLSX 同一 API |
-| 💰 **明码标价** | 多数厂商按企业谈判,我们 ¥0.01-¥0.20/次 |
-| 🔓 **Apache 2.0 开源** | 闭源 OCR 厂商无审计,代码透明可定制 |
-| 🏢 **私有化部署** | SaaS 厂商无私有化,我们支持 VPC/专有云 |
-| 🔐 **数据本地化** | 海外厂商数据出境风险,我们支持境内/境外 |
-
-### 典型 ROI
-
-| 行业 | 场景 | 客户案例 | ROI |
-|------|------|---------|-----|
-| 🏪 零售连锁 | 票据自动化 | [案例 →](./docs/case-studies/industry-roi.md#案例-1-零售连锁票据自动化) | **500%** (¥150 万/年节省) |
-| 🏦 银行 | 流水审核 | [案例 →](./docs/case-studies/industry-roi.md#案例-3-银行流水智能审核) | **1200%** (¥420 万/年节省) |
-| 💊 医药 | GSP 合规 | [案例 →](./docs/case-studies/industry-roi.md#案例-2-医药流通-gsp-合规) | **300%** |
-| 📋 律所 | 合同审查 | [案例 →](./docs/case-studies/industry-roi.md#案例-4-律所合同智能审查) | **业务能力 3x 提升** |
-
-📊 **完整案例**: [docs/case-studies/industry-roi.md](./docs/case-studies/industry-roi.md)
-💰 **定价方案**: [docs/customer/pricing.md](./docs/customer/pricing.md)
-🚀 **30 天免费试用**: [vibecoding.dev/signup](https://vibecoding.dev/signup)
 
 ---
 
@@ -138,11 +106,24 @@
 
 ## 🚀 快速开始
 
+### 本地运行（开发模式）
+
+```bash
+# 运行完整流程
+bash scripts/local_run.sh -m flow
+
+# 运行单个节点
+bash scripts/local_run.sh -m node -n node_name
+
+# 启动HTTP服务
+bash scripts/http_run.sh -m http -p 9001
+```
+
 ### 1. 安装
 
 ```bash
-git clone https://github.com/your-org/packcv.git
-cd packcv
+git clone https://github.com/iflykingc-oss/newPackCV-OCR.git
+cd newPackCV-OCR
 
 # 使用 uv 安装（推荐）
 uv sync
@@ -150,19 +131,13 @@ uv sync
 # 安装OCR引擎
 apt-get install tesseract-ocr tesseract-ocr-chi-sim tesseract-ocr-jpn tesseract-ocr-kor
 pip install paddleocr
-
-# 安装MinerU（文档解析，可选）
-uv add mineru
-
-# 安装pyzbar（条码解码，可选）
-uv add pyzbar
 ```
 
 ### 2. 启动服务
 
 ```bash
-# 启动API服务器（端口 9000）
-python src/main.py
+# 启动API服务器（端口 9001）
+PYTHONPATH=src uvicorn api.main:app --host 0.0.0.0 --port 9001
 
 # 或使用 Docker
 docker-compose up -d
@@ -172,116 +147,43 @@ docker-compose up -d
 
 ```bash
 # 图片识别（自动场景检测）
-curl -X POST http://localhost:9000/ocr/recognize \
+curl -X POST http://localhost:9001/api/v1/extract \
   -H "Content-Type: application/json" \
-  -d '{"image_url": "https://example.com/product.jpg"}'
+  -H "X-API-Key: your-api-key" \
+  -d '{"input_file":{"url":"https://example.com/product.jpg"}}'
 
-# PDF文档解析
-curl -X POST http://localhost:9000/ocr/recognize \
+# GraphQL 查询（Phase 7 新增）
+curl -X POST http://localhost:9001/graphql/ \
   -H "Content-Type: application/json" \
-  -d '{"image_url": "https://example.com/invoice.pdf"}'
-
-# 指定场景 + 自定义模型
-curl -X POST http://localhost:9000/ocr/recognize \
-  -H "Content-Type: application/json" \
-  -d '{
-    "image_url": "https://example.com/invoice.jpg",
-    "custom_model": "gpt-4o",
-    "ocr_engine": "smart"
-  }'
-
-# 多租户（配置自动继承）
-curl -X POST http://localhost:9000/ocr/recognize \
-  -H "Content-Type: application/json" \
-  -d '{
-    "image_url": "https://example.com/medicine.jpg",
-    "tenant_id": "pharma_corp_a"
-  }'
+  -d '{"query":"{ health { live ready } providers { id name } }"}'
 ```
 
 ### 4. Web Demo
 
-浏览器打开 `http://localhost:9000/demo`——拖拽图片即得结构化JSON。
+浏览器打开 `http://localhost:9001/` — 拖拽图片即得结构化JSON。
 
 ### 5. 健康检查
 
 ```bash
-curl http://localhost:9000/health       # 存活探针
-curl http://localhost:9000/ready        # 就绪探针
-curl http://localhost:9000/metrics      # 运行指标
+curl http://localhost:9001/health/live     # 存活探针
+curl http://localhost:9001/health/ready    # 就绪探针
+curl http://localhost:9001/health/startup  # 启动探针
+curl http://localhost:9001/tracing/status  # 追踪状态（Phase 7）
 ```
 
 ---
 
-## ⚙️ 配置体系
+## 🆕 Phase 7 功能优化
 
-### 三级配置链（优先级递增）
-
-```
-Level 1: 文件配置（静态全局默认）
-         config/model_extract_llm_cfg.json
-         config/finance_extract_llm_cfg.json
-         config/pharma_extract_llm_cfg.json
-         ...
-
-Level 2: 租户DB（多租户覆盖）
-         PUT /api/config/tenant/{tenant_id}
-         {"scenario_overrides": {"finance_receipt": {"model": "gpt-4o"}}}
-
-Level 3: 运行时注入（单次请求覆盖）
-         {"custom_model_config": {"model": "claude-3-5-sonnet"}}
-```
-
-### 自定义模型接入
-
-配置文件 `src/config/engine_adapter_cfg.json`：
-
-```json
-{
-  "ocr_engines": {
-    "custom_engines": [
-      {
-        "name": "my-ocr",
-        "endpoint": "http://my-vllm-server:8000/v1",
-        "model": "my-ocr-model",
-        "api_key": "sk-xxx",
-        "priority": 0
-      }
-    ]
-  }
-}
-```
-
-支持任意 **OpenAI兼容API** 端点：vLLM / Ollama / OpenAI / Claude / 通义千问 / DeepSeek
-
----
-
-## 🤖 IM平台发布（SaaS多租户）
-
-### 配置管理API
-
-```http
-# 设置租户场景配置
-PUT /api/config/tenant/{tenant_id}
-{
-  "scenario_overrides": {
-    "finance_receipt": {"model": "gpt-4o", "temperature": 0.0},
-    "pharmaceutical": {"model": "claude-3-5-sonnet", "temperature": 0.1}
-  }
-}
-
-# 查看配置摘要
-GET /api/config/summary
-
-# 删除租户配置（恢复默认）
-DELETE /api/config/tenant/{tenant_id}
-```
-
-### 飞书/钉钉/企微机器人
-
-1. 创建飞书自定义机器人 → 复制Webhook URL
-2. 配置 `src/config/im_platform.json`
-3. 用户在群聊中发送图片→机器人自动识别并返回结构化结果
+| 模块 | 端点 | 功能 |
+|------|------|------|
+| 分布式追踪 | `/tracing/status` | OpenTelemetry 集成 |
+| API 文档增强 | `/docs-enhanced/*` | 错误码表 + SDK 指南 |
+| 错误码标准化 | `/errors/list` | 15 个预定义错误码 |
+| 配置热更新 | `/config/*` | 无重启切换 Provider |
+| 数据血缘 | `/lineage/stats` | 每条记录可溯源 |
+| GraphQL API | `/graphql/` | 统一查询接口 |
+| 限流仪表盘 | `/monitoring/*` | 实时延迟 + TopN |
 
 ---
 
@@ -290,9 +192,8 @@ DELETE /api/config/tenant/{tenant_id}
 | 能力 | 覆盖范围 |
 |------|---------|
 | 错误消息 | 10语种 (zh/en/ja/ko/fr/de/es/ar/ru/pt) |
+| Web 后台 | 中/英/日三语言切换 |
 | 币种识别 | 7种 (CNY/USD/EUR/JPY/GBP/KRW/INR) |
-| 时区支持 | 全部 IANA 时区 |
-| Unicode | NFC标准化 + 全字符集覆盖 |
 | OCR语言 | 109语言 (MinerU) + 80+语言 (PaddleOCR) |
 
 ---
@@ -301,61 +202,53 @@ DELETE /api/config/tenant/{tenant_id}
 
 | 组件 | 技术 |
 |------|------|
-| 工作流引擎 | LangGraph (23节点DAG) |
-| 文档解析 | MinerU 3.1+ (pipeline/VLM/hybrid三引擎) |
-| 多模态VL | PaddleOCR-VL-1.6 / MiniCPM-o / VLM-First |
-| OCR引擎 | LightOnOCR / DeepSeek-OCR / PaddleOCR / Tesseract |
-| 条码解码 | pyzbar (1D/2D全格式) |
-| 增强处理 | CLAHE + TPS弯曲校正 + 维纳去模糊 |
-| 后端 | Python FastAPI |
-| 配置存储 | SQLite (支持迁移到PostgreSQL) |
-| 测试 | pytest (65用例) |
+| 工作流引擎 | LangGraph 1.2 (9节点DAG) |
+| 后端 | FastAPI + uvicorn |
+| 多租户 | 6层隔离 + 5级套餐 |
+| 断路器 | CLOSED/OPEN/HALF_OPEN 三态机 |
+| GraphQL | Ariadne |
+| 追踪 | OpenTelemetry |
+| 缓存 | Redis + LRU TTL |
+| 测试 | pytest (22用例) |
 | CI/CD | GitHub Actions |
-| 容器化 | Docker / Docker Compose |
+| 容器化 | Docker / K8s Helm |
 
 ---
 
 ## 📁 目录结构
 
 ```
-packcv/
-├── config/                      # LLM配置文件（8场景+检测）
-│   ├── model_extract_llm_cfg.json
-│   ├── finance_extract_llm_cfg.json
-│   ├── pharma_extract_llm_cfg.json
-│   ├── contract_extract_llm_cfg.json
-│   ├── document_extract_llm_cfg.json
-│   └── ...
+newPackCV-OCR/
+├── config/                      # LLM配置文件
+├── data/                        # Provider配置
 ├── src/
-│   ├── graphs/
-│   │   ├── graph.py            # 23节点主图编排
-│   │   ├── state.py            # 全局+节点状态定义
-│   │   └── nodes/              # 活跃节点
-│   │       ├── input_router_node.py
-│   │       ├── scenario_detector_node.py
-│   │       ├── image_quality_enhance_node.py
-│   │       ├── text_curvature_correct_node.py
-│   │       ├── multi_channel_fusion_node.py  # 含条码+印章
-│   │       ├── document_parse_node.py        # MinerU
-│   │       ├── smart_postprocess_node.py
-│   │       └── ...
-│   ├── utils/
-│   │   ├── document_engines/   # MinerU文档引擎适配器
-│   │   ├── ocr_engines/        # OCR引擎适配器+SmartRouter
-│   │   ├── vl_engines/         # VL引擎适配器+SmartRouter
-│   │   ├── scenario_schemas/   # 8场景Schema注册中心
-│   │   ├── config_manager.py   # 三级配置链
-│   │   ├── i18n.py             # 海外多语言支持
-│   │   ├── ocr_fusion.py       # OCR多引擎融合
-│   │   ├── ocr_postprocess.py  # OCR后处理纠错
-│   │   ├── table_detector.py   # 表格检测
-│   │   └── im_platform/        # 飞书/钉钉/企微
-│   ├── tests/                  # pytest (65用例)
-│   ├── web_server.py           # API服务 + Admin
-│   └── main.py                 # 启动入口
-├── .github/workflows/ci.yml   # CI/CD
-├── CHANGELOG.md                # 版本变更记录
-└── AGENTS.md                   # 完整节点清单
+│   ├── api/                     # FastAPI 路由
+│   │   ├── main.py              # 入口
+│   │   ├── middleware/          # 鉴权
+│   │   └── routes/              # 端点
+│   ├── graphs/                  # LangGraph 工作流
+│   │   ├── graph.py             # 主图编排
+│   │   ├── state.py             # 状态定义
+│   │   └── nodes/               # 节点实现
+│   ├── tenancy/                 # 多租户
+│   ├── intelligence/            # LLM缓存/A-B/Few-shot
+│   ├── resilience/              # 断路器/优雅关停
+│   ├── tracing/                 # OpenTelemetry
+│   ├── errors/                  # 错误码标准化
+│   ├── config_hotreload/        # 配置热更新
+│   ├── data_lineage/            # 数据血缘
+│   ├── gql_api/                 # GraphQL
+│   ├── i18n/                    # 国际化
+│   ├── web/                     # Web 后台
+│   ├── tests/                   # pytest
+│   └── utils/                   # 工具类
+├── k8s/helm/                    # K8s Helm Chart
+├── sdk/                         # Python/JS SDK
+├── docs/                        # 文档
+├── monitoring/                  # Prometheus 告警
+├── .github/workflows/           # CI/CD
+├── AGENTS.md                    # 项目索引
+└── README.md                    # 本文件
 ```
 
 ---
@@ -363,53 +256,26 @@ packcv/
 ## 🧪 测试
 
 ```bash
-# 运行全部测试（65用例）
-PYTHONPATH=. python -m pytest src/tests/ -v
+# 运行单元测试
+PYTHONPATH=src pytest src/tests/unit/ -v
 
-# 仅单元测试
-PYTHONPATH=. python -m pytest src/tests/unit/ -v
-
-# 仅集成测试
-PYTHONPATH=. python -m pytest src/tests/integration/ -v
+# 运行覆盖率
+PYTHONPATH=src pytest src/tests/unit/ -v --cov=src --cov-report=term-missing
 ```
 
 ---
 
 ## 📚 进阶阅读
 
-- 📐 [架构详解](./docs/architecture.md) — 完整图拓扑 + 智能梯级 + 三级配置链
-- 🎯 [场景开发指南](./docs/scenarios/README.md) — 8 场景 Schema 定义 + 自定义场景
-- 🔌 [API 参考](./docs/api/README.md) — REST API 端点 + 集成示例
-- 🛠 [开发者指南](./docs/development.md) — 添加自定义节点/引擎/场景
-- 📊 [AGENTS.md](./AGENTS.md) — 项目结构索引
-
----
-
-## 🧪 完整示例
-
-查看 [examples/](./examples) 目录：
-
-- `basic_image_ocr.py` — 基础图片 OCR
-- `document_parse.py` — PDF/DOCX 解析
-- `scenario_specific.py` — 多场景批量提取
-- `tenant_config.py` — SaaS 多租户配置
+- 📐 [AGENTS.md](./AGENTS.md) — 项目结构索引 + 模块清单
+- 🔌 GraphQL Schema — `/graphql/` 端点查询
 
 ---
 
 ## 🤝 贡献
 
-欢迎贡献！请阅读 [CONTRIBUTING.md](./CONTRIBUTING.md) 了解详细流程。
-
-提交规范遵循 [Conventional Commits](https://www.conventionalcommits.org/)。
+欢迎贡献！提交规范遵循 [Conventional Commits](https://www.conventionalcommits.org/)。
 
 ## 📄 许可证
 
 Apache License 2.0 — 详见 [LICENSE](./LICENSE)
-
-## 🔒 安全
-
-发现安全漏洞？参考 [SECURITY.md](./SECURITY.md) 报告。
-
-## 📜 行为准则
-
-参与项目即代表同意 [CODE_OF_CONDUCT.md](./CODE_OF_CONDUCT.md)。

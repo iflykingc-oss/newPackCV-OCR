@@ -1,0 +1,274 @@
+# ===================================================================
+# PackCV-OCR 生产部署 - 完整服务编排
+# 包含: API × 3, Redis, PostgreSQL, Prometheus, Grafana, Nginx
+# ===================================================================
+version: "3.9"
+
+x-common-env: &common-env
+  ENV: production
+  REDIS_URL: redis://redis:6379/0
+  POSTGRES_URL: postgresql://${POSTGRES_USER}:${POSTGRES_PASSWORD}@postgres:5432/packcv
+  LANGCHAIN_TRACING_V2: "true"
+  LANGCHAIN_API_KEY: ${LANGSMITH_API_KEY:-}
+  LANGCHAIN_PROJECT: packcv-prod
+  LANGCHAIN_ENDPOINT: https://api.smith.langchain.com
+  TZ: Asia/Shanghai
+
+x-api-common: &api-common
+  image: packcv-ocr:${IMAGE_TAG:-latest}
+  environment:
+    <<: *common-env
+  restart: unless-stopped
+  networks:
+    - packcv-net
+  depends_on:
+    redis:
+      condition: service_healthy
+    postgres:
+      condition: service_healthy
+  deploy:
+    resources:
+      limits:
+        cpus: "2.0"
+        memory: 2G
+      reservations:
+        cpus: "0.5"
+        memory: 512M
+  healthcheck:
+    test: ["CMD", "curl", "-fsS", "http://localhost:9001/api/v1/health"]
+    interval: 30s
+    timeout: 10s
+    retries: 3
+    start_period: 60s
+  logging: &logging
+    driver: "json-file"
+    options:
+      max-size: "20m"
+      max-file: "5"
+
+services:
+  # ============================================================
+  # API服务 × 3 (负载均衡)
+  # ============================================================
+  api-1:
+    <<: *api-common
+    container_name: packcv-api-1
+    hostname: api-1
+
+  api-2:
+    <<: *api-common
+    container_name: packcv-api-2
+    hostname: api-2
+
+  api-3:
+    <<: *api-common
+    container_name: packcv-api-3
+    hostname: api-3
+
+  # ============================================================
+  # Redis 缓存/限流/会话
+  # ============================================================
+  redis:
+    image: redis:7.2-alpine
+    container_name: packcv-redis
+    hostname: redis
+    command: >
+      redis-server
+      --maxmemory 1gb
+      --maxmemory-policy allkeys-lru
+      --appendonly yes
+      --appendfsync everysec
+      --save 60 1000
+      --requirepass ${REDIS_PASSWORD:-}
+    volumes:
+      - redis_data:/data
+    networks:
+      - packcv-net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1.5G
+    healthcheck:
+      test: ["CMD", "redis-cli", "ping"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+      start_period: 10s
+    logging: *logging
+
+  # ============================================================
+  # PostgreSQL 持久化
+  # ============================================================
+  postgres:
+    image: postgres:15-alpine
+    container_name: packcv-postgres
+    hostname: postgres
+    environment:
+      POSTGRES_DB: packcv
+      POSTGRES_USER: ${POSTGRES_USER}
+      POSTGRES_PASSWORD: ${POSTGRES_PASSWORD}
+      POSTGRES_INITDB_ARGS: "--encoding=UTF8 --locale=C"
+    volumes:
+      - postgres_data:/var/lib/postgresql/data
+      - ./scripts/postgres_init.sql:/docker-entrypoint-initdb.d/init.sql:ro
+    networks:
+      - packcv-net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "2.0"
+          memory: 4G
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U ${POSTGRES_USER} -d packcv"]
+      interval: 15s
+      timeout: 10s
+      retries: 5
+      start_period: 30s
+    logging: *logging
+
+  # ============================================================
+  # Nginx 反向代理 + SSL
+  # ============================================================
+  nginx:
+    image: nginx:1.25-alpine
+    container_name: packcv-nginx
+    hostname: nginx
+    ports:
+      - "80:80"
+      - "443:443"
+    volumes:
+      - ./nginx/nginx.conf:/etc/nginx/nginx.conf:ro
+      - ./nginx/certs:/etc/nginx/certs:ro
+      - ./nginx/logs:/var/log/nginx
+    networks:
+      - packcv-net
+    depends_on:
+      - api-1
+      - api-2
+      - api-3
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 512M
+    healthcheck:
+      test: ["CMD", "wget", "--spider", "-q", "http://localhost/health"]
+      interval: 30s
+      timeout: 10s
+      retries: 3
+    logging: *logging
+
+  # ============================================================
+  # Prometheus 监控
+  # ============================================================
+  prometheus:
+    image: prom/prometheus:v2.48.0
+    container_name: packcv-prometheus
+    hostname: prometheus
+    command:
+      - "--config.file=/etc/prometheus/prometheus.yml"
+      - "--storage.tsdb.path=/prometheus"
+      - "--storage.tsdb.retention.time=30d"
+      - "--web.console.libraries=/usr/share/prometheus/console_libraries"
+      - "--web.console.templates=/usr/share/prometheus/consoles"
+      - "--web.enable-lifecycle"
+    volumes:
+      - ./monitoring/prometheus.yml:/etc/prometheus/prometheus.yml:ro
+      - ./monitoring/alert_rules.yml:/etc/prometheus/alert_rules.yml:ro
+      - prometheus_data:/prometheus
+    ports:
+      - "9090:9090"
+    networks:
+      - packcv-net
+    depends_on:
+      - api-1
+      - api-2
+      - api-3
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "1.0"
+          memory: 1G
+    logging: *logging
+
+  # ============================================================
+  # Grafana 可视化
+  # ============================================================
+  grafana:
+    image: grafana/grafana:10.2.0
+    container_name: packcv-grafana
+    hostname: grafana
+    environment:
+      GF_SECURITY_ADMIN_USER: ${GRAFANA_USER:-admin}
+      GF_SECURITY_ADMIN_PASSWORD: ${GRAFANA_PASSWORD}
+      GF_USERS_ALLOW_SIGN_UP: "false"
+      GF_SERVER_ROOT_URL: https://${DOMAIN:-localhost}/grafana
+      GF_INSTALL_PLUGINS: grafana-clock-panel
+    volumes:
+      - ./monitoring/grafana_dashboard.json:/var/lib/grafana/dashboards/packcv.json:ro
+      - ./monitoring/grafana_provisioning:/etc/grafana/provisioning:ro
+      - grafana_data:/var/lib/grafana
+    ports:
+      - "3000:3000"
+    networks:
+      - packcv-net
+    depends_on:
+      - prometheus
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.5"
+          memory: 512M
+    logging: *logging
+
+  # ============================================================
+  # AlertManager 告警
+  # ============================================================
+  alertmanager:
+    image: prom/alertmanager:v0.26.0
+    container_name: packcv-alertmanager
+    hostname: alertmanager
+    command:
+      - "--config.file=/etc/alertmanager/alertmanager.yml"
+    volumes:
+      - ./monitoring/alertmanager.yml:/etc/alertmanager/alertmanager.yml:ro
+    ports:
+      - "9093:9093"
+    networks:
+      - packcv-net
+    restart: unless-stopped
+    deploy:
+      resources:
+        limits:
+          cpus: "0.3"
+          memory: 256M
+    logging: *logging
+
+# ============================================================
+# 网络
+# ============================================================
+networks:
+  packcv-net:
+    driver: bridge
+    ipam:
+      config:
+        - subnet: 172.20.0.0/16
+
+# ============================================================
+# 持久化数据卷
+# ============================================================
+volumes:
+  redis_data:
+    driver: local
+  postgres_data:
+    driver: local
+  prometheus_data:
+    driver: local
+  grafana_data:
+    driver: local

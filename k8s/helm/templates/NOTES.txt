@@ -1,0 +1,22 @@
+🎉 PackCV-OCR 已部署！
+
+版本: {{ .Chart.AppVersion }}
+命名空间: {{ .Release.Namespace }}
+
+📊 监控:
+{{- if .Values.serviceMonitor.enabled }}
+  Prometheus ServiceMonitor 已启用（采集 /metrics）
+{{- end }}
+{{- if .Values.autoscaling.enabled }}
+  HPA: {{ .Values.autoscaling.minReplicas }}-{{ .Values.autoscaling.maxReplicas }} 副本
+{{- end }}
+
+🔗 访问地址:
+{{- range .Values.ingress.hosts }}
+  https://{{ .host }}
+{{- end }}
+
+📝 验证命令:
+  kubectl get pods -l app.kubernetes.io/name={{ .Chart.Name }} -n {{ .Release.Namespace }}
+  kubectl port-forward svc/{{ include "packcv-ocr.fullname" . }} 9000:9000 -n {{ .Release.Namespace }}
+  curl http://localhost:9000/api/v1/health

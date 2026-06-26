@@ -1,0 +1,243 @@
+{
+  "version": "1.0.0",
+  "updated_at": "2026-06-25",
+  "providers": [
+    {
+      "provider_id": "doubao",
+      "name": "豆包（Doubao）",
+      "vendor": "ByteDance Volcengine",
+      "enabled": true,
+      "api_base": "https://ark.cn-beijing.volces.com/api/v3",
+      "auth_method": "api_key",
+      "region": "cn-beijing",
+      "tier_mapping": {
+        "FLAGSHIP": "doubao-pro-256k",
+        "ENTERPRISE": "doubao-pro-128k",
+        "PRO": "doubao-pro-32k",
+        "BASIC": "doubao-lite-32k",
+        "FREE": "doubao-mini-8k"
+      }
+    },
+    {
+      "provider_id": "kimi",
+      "name": "Kimi (Moonshot)",
+      "vendor": "Moonshot AI",
+      "enabled": true,
+      "api_base": "https://api.moonshot.cn/v1",
+      "auth_method": "api_key",
+      "region": "cn-bj",
+      "tier_mapping": {
+        "FLAGSHIP": "moonshot-v1-128k",
+        "ENTERPRISE": "moonshot-v1-128k",
+        "PRO": "moonshot-v1-32k",
+        "BASIC": "moonshot-v1-32k",
+        "FREE": "moonshot-v1-8k"
+      }
+    },
+    {
+      "provider_id": "qwen",
+      "name": "通义千问（Qwen）",
+      "vendor": "Alibaba Cloud",
+      "enabled": true,
+      "api_base": "https://dashscope.aliyuncs.com/compatible-mode/v1",
+      "auth_method": "api_key",
+      "region": "cn-hangzhou",
+      "tier_mapping": {
+        "FLAGSHIP": "qwen3.5-plus",
+        "ENTERPRISE": "qwen3.5-plus",
+        "PRO": "qwen3.5-turbo",
+        "BASIC": "qwen3.5-turbo",
+        "FREE": "qwen-turbo"
+      }
+    },
+    {
+      "provider_id": "deepseek",
+      "name": "DeepSeek",
+      "vendor": "DeepSeek AI",
+      "enabled": true,
+      "api_base": "https://api.deepseek.com/v1",
+      "auth_method": "api_key",
+      "region": "cn",
+      "tier_mapping": {
+        "FLAGSHIP": "deepseek-chat",
+        "ENTERPRISE": "deepseek-chat",
+        "PRO": "deepseek-chat",
+        "BASIC": "deepseek-chat",
+        "FREE": "deepseek-chat"
+      }
+    },
+    {
+      "provider_id": "openai",
+      "name": "OpenAI (兼容)",
+      "vendor": "OpenAI",
+      "enabled": false,
+      "api_base": "https://api.openai.com/v1",
+      "auth_method": "api_key",
+      "region": "us",
+      "tier_mapping": {}
+    }
+  ],
+  "models": [
+    {
+      "model_id": "doubao-pro-256k",
+      "provider": "doubao",
+      "display_name": "豆包 Pro 256K",
+      "tier": "FLAGSHIP",
+      "capabilities": ["text", "vision", "json_mode", "function_call"],
+      "pricing": {"input_per_1k": 0.008, "output_per_1k": 0.012},
+      "context_window": 262144,
+      "supports_json_mode": true,
+      "supports_vision": true,
+      "tpm_limit": 800000
+    },
+    {
+      "model_id": "doubao-pro-128k",
+      "provider": "doubao",
+      "display_name": "豆包 Pro 128K",
+      "tier": "ENTERPRISE",
+      "capabilities": ["text", "vision", "json_mode", "function_call"],
+      "pricing": {"input_per_1k": 0.005, "output_per_1k": 0.009},
+      "context_window": 131072,
+      "supports_json_mode": true,
+      "supports_vision": true,
+      "tpm_limit": 600000
+    },
+    {
+      "model_id": "doubao-pro-32k",
+      "provider": "doubao",
+      "display_name": "豆包 Pro 32K",
+      "tier": "PRO",
+      "capabilities": ["text", "vision", "json_mode"],
+      "pricing": {"input_per_1k": 0.003, "output_per_1k": 0.006},
+      "context_window": 32768,
+      "supports_json_mode": true,
+      "supports_vision": true,
+      "tpm_limit": 400000
+    },
+    {
+      "model_id": "doubao-lite-32k",
+      "provider": "doubao",
+      "display_name": "豆包 Lite 32K",
+      "tier": "BASIC",
+      "capabilities": ["text", "json_mode"],
+      "pricing": {"input_per_1k": 0.001, "output_per_1k": 0.002},
+      "context_window": 32768,
+      "supports_json_mode": true,
+      "supports_vision": false,
+      "tpm_limit": 200000
+    },
+    {
+      "model_id": "doubao-mini-8k",
+      "provider": "doubao",
+      "display_name": "豆包 Mini 8K",
+      "tier": "FREE",
+      "capabilities": ["text"],
+      "pricing": {"input_per_1k": 0.0005, "output_per_1k": 0.0008},
+      "context_window": 8192,
+      "supports_json_mode": false,
+      "supports_vision": false,
+      "tpm_limit": 100000
+    },
+    {
+      "model_id": "moonshot-v1-128k",
+      "provider": "kimi",
+      "display_name": "Kimi 128K",
+      "tier": "FLAGSHIP",
+      "capabilities": ["text", "json_mode", "function_call", "long_context"],
+      "pricing": {"input_per_1k": 0.006, "output_per_1k": 0.006},
+      "context_window": 131072,
+      "supports_json_mode": true,
+      "supports_vision": false,
+      "tpm_limit": 500000
+    },
+    {
+      "model_id": "moonshot-v1-32k",
+      "provider": "kimi",
+      "display_name": "Kimi 32K",
+      "tier": "PRO",
+      "capabilities": ["text", "json_mode", "long_context"],
+      "pricing": {"input_per_1k": 0.003, "output_per_1k": 0.003},
+      "context_window": 32768,
+      "supports_json_mode": true,
+      "supports_vision": false,
+      "tpm_limit": 300000
+    },
+    {
+      "model_id": "qwen3.5-plus",
+      "provider": "qwen",
+      "display_name": "通义千问 3.5 Plus",
+      "tier": "FLAGSHIP",
+      "capabilities": ["text", "vision", "json_mode", "function_call"],
+      "pricing": {"input_per_1k": 0.004, "output_per_1k": 0.012},
+      "context_window": 131072,
+      "supports_json_mode": true,
+      "supports_vision": true,
+      "tpm_limit": 500000
+    },
+    {
+      "model_id": "qwen3.5-turbo",
+      "provider": "qwen",
+      "display_name": "通义千问 3.5 Turbo",
+      "tier": "PRO",
+      "capabilities": ["text", "json_mode"],
+      "pricing": {"input_per_1k": 0.002, "output_per_1k": 0.006},
+      "context_window": 131072,
+      "supports_json_mode": true,
+      "supports_vision": false,
+      "tpm_limit": 300000
+    },
+    {
+      "model_id": "deepseek-chat",
+      "provider": "deepseek",
+      "display_name": "DeepSeek Chat",
+      "tier": "PRO",
+      "capabilities": ["text", "json_mode", "function_call"],
+      "pricing": {"input_per_1k": 0.001, "output_per_1k": 0.002},
+      "context_window": 65536,
+      "supports_json_mode": true,
+      "supports_vision": false,
+      "tpm_limit": 400000
+    }
+  ],
+  "routing_rules": [
+    {
+      "rule_id": "default-fallback",
+      "description": "默认5级降级链",
+      "priority": 100,
+      "enabled": true,
+      "chain": [
+        "doubao-pro-256k",
+        "kimi/moonshot-v1-128k",
+        "qwen/qwen3.5-plus",
+        "doubao-lite-32k",
+        "doubao-mini-8k"
+      ]
+    },
+    {
+      "rule_id": "json-mode-required",
+      "description": "需要 JSON 输出时跳过不支持的模型",
+      "priority": 90,
+      "enabled": true,
+      "filter": {"supports_json_mode": true}
+    },
+    {
+      "rule_id": "vision-required",
+      "description": "需要视觉能力",
+      "priority": 80,
+      "enabled": true,
+      "filter": {"supports_vision": true}
+    }
+  ],
+  "degradation_policies": [
+    {"from_tier": "FLAGSHIP", "to_tier": "ENTERPRISE", "trigger": "circuit_open"},
+    {"from_tier": "ENTERPRISE", "to_tier": "PRO", "trigger": "circuit_open"},
+    {"from_tier": "PRO", "to_tier": "BASIC", "trigger": "circuit_open"},
+    {"from_tier": "BASIC", "to_tier": "FREE", "trigger": "circuit_open"}
+  ],
+  "rate_limit_policies": {
+    "default_rpm": 600,
+    "default_tpm": 1000000,
+    "burst_factor": 1.5,
+    "adaptive_enabled": true
+  }
+}

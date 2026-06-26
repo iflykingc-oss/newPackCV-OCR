@@ -1,0 +1,33 @@
+{
+  "$comment": "LangSmith追踪配置 - V7.0可观测性",
+  "tracing": {
+    "enabled": true,
+    "endpoint": "https://api.smith.langchain.com",
+    "project_name": "packcv-ocr-v7-prod",
+    "sampling_rate": 1.0,
+    "capture_inputs": true,
+    "capture_outputs": true
+  },
+  "metadata": {
+    "service": "packcv-ocr",
+    "version": "7.0-pro",
+    "environment": "${ENV:production}",
+    "node_level_trace": true,
+    "token_tracking": true,
+    "cost_tracking": true,
+    "latency_tracking": true
+  },
+  "alerts": {
+    "p99_latency_ms": 5000,
+    "error_rate_threshold": 0.01,
+    "cost_per_request_usd": 0.05,
+    "daily_cost_usd": 100
+  },
+  "evaluation": {
+    "datasets": {
+      "production_samples": "data/eval/production_samples.jsonl",
+      "regression_suite": "data/eval/regression_suite.jsonl"
+    },
+    "metrics": ["accuracy", "latency", "cost", "hallucination_rate"]
+  }
+}

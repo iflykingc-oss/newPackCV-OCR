@@ -1,0 +1,15 @@
+apiVersion: v1
+kind: ConfigMap
+metadata:
+  name: {{ include "packcv-ocr.fullname" . }}-config
+  labels:
+    {{- include "packcv-ocr.labels" . | nindent 4 }}
+data:
+  ENV: {{ .Values.env.ENV | default "prod" | quote }}
+  LOG_LEVEL: {{ .Values.env.LOG_LEVEL | default "INFO" | quote }}
+  REDIS_URL: {{ .Values.env.REDIS_URL | default "redis://localhost:6379/0" | quote }}
+  LANGCHAIN_TRACING_V2: {{ .Values.env.LANGCHAIN_TRACING_V2 | default "true" | quote }}
+  WORKERS: "4"
+  MAX_REQUESTS: "1000"
+  MAX_REQUESTS_JITTER: "100"
+  TIMEOUT_KEEP_ALIVE: "65"

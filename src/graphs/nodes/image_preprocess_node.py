@@ -1,3 +1,9 @@
+<<<<<<< HEAD
+#!/usr/bin/env python3
+"""图片预处理节点 - 文件验证和基础处理"""
+import os
+import logging
+=======
 # -*- coding: utf-8 -*-
 """
 图像预处理节点 - 深度优化版 V2.5
@@ -17,16 +23,23 @@ import cv2
 import numpy as np
 from PIL import Image
 
+>>>>>>> origin/main
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from coze_coding_utils.runtime_ctx.context import Context
 from graphs.state import ImagePreprocessInput, ImagePreprocessOutput
+<<<<<<< HEAD
+from utils.file.file import File, FileOps
+=======
 from utils.file.file import File
 from coze_coding_dev_sdk.s3 import S3SyncStorage
+>>>>>>> origin/main
 
 logger = logging.getLogger(__name__)
 
 
+<<<<<<< HEAD
+=======
 def _get_s3_storage() -> S3SyncStorage:
     """获取S3对象存储客户端"""
     return S3SyncStorage(
@@ -608,12 +621,54 @@ def enhance_for_ocr(img: np.ndarray) -> Tuple[np.ndarray, Dict[str, Any]]:
     return result, info
 
 
+>>>>>>> origin/main
 def image_preprocess_node(
     state: ImagePreprocessInput,
     config: RunnableConfig,
     runtime: Runtime[Context]
 ) -> ImagePreprocessOutput:
     """
+<<<<<<< HEAD
+    title: 文件预处理
+    desc: 对输入文件进行验证和基础预处理，确保文件可被后续节点正确处理
+    integrations: 无
+    """
+    ctx = runtime.context
+    
+    input_file = state.input_file
+    
+    # 文件类型判断
+    file_url = input_file.url
+    image_extensions = ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif']
+    document_extensions = ['.pdf', '.docx', '.doc', '.pptx', '.ppt', '.xlsx', '.xls', '.txt', '.md']
+    
+    file_ext = os.path.splitext(file_url)[1].lower() if file_url else ''
+    is_image = file_ext in image_extensions
+    
+    # 预处理逻辑：
+    # 1. 验证文件可访问性（通过FileOps读取）
+    # 2. 图片文件：标记为已预处理（后续可进行增强处理）
+    # 3. 文档文件：验证格式支持，准备OCR处理
+    
+    try:
+        # 验证文件可读
+        content = FileOps.read_bytes(input_file)
+        if len(content) == 0:
+            logger.warning(f"文件内容为空: {file_url}")
+            
+        # 预处理完成，返回验证后的文件
+        preprocessed_file = input_file
+        
+        file_type_str = "图片" if is_image else "文档"
+        logger.info(f"预处理完成: {file_url} (类型: {file_type_str}, 大小: {len(content)} bytes)")
+        
+    except Exception as e:
+        logger.error(f"文件预处理失败: {e}")
+        # 即使失败也返回原文件，让后续节点处理错误
+        preprocessed_file = input_file
+    
+    return ImagePreprocessOutput(preprocessed_file=preprocessed_file)
+=======
     title: 图像预处理
     desc: 对输入图片进行OCR前轻量级预处理（CLAHE对比度增强+锐化），处理后的图片上传到对象存储。
           RapidOCR自带文本检测+方向分类，无需额外方向/区域检测。
@@ -685,3 +740,4 @@ def image_preprocess_node(
         return ImagePreprocessOutput(
             is_enhanced=False
         )
+>>>>>>> origin/main

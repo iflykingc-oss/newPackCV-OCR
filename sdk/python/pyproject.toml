@@ -1,50 +1,41 @@
 [build-system]
-requires = ["setuptools>=61.0", "wheel"]
+requires = ["setuptools>=68", "wheel"]
 build-backend = "setuptools.build_meta"
 
 [project]
 name = "packcv-ocr"
-version = "6.3.0"
-description = "Official Python SDK for VibeCoding-OCR (8-scenario multimodal OCR + document parsing)"
+version = "1.0.0"
+description = "PackCV-OCR 多租户文档智能提取服务 - Python 客户端"
 readme = "README.md"
-license = { text = "Apache-2.0" }
-authors = [
-    { name = "VibeCoding Team", email = "team@vibecoding.dev" }
-]
-maintainers = [
-    { name = "VibeCoding Team", email = "team@vibecoding.dev" }
-]
-keywords = ["ocr", "document-ai", "vlm", "multimodal", "sdk", "packcv", "extraction"]
+license = { text = "MIT" }
+authors = [{ name = "PackCV Team", email = "team@packcv-ocr.io" }]
+keywords = ["ocr", "document-ai", "multi-tenant", "api-client", "langgraph"]
+requires-python = ">=3.9"
 classifiers = [
     "Development Status :: 5 - Production/Stable",
     "Intended Audience :: Developers",
-    "License :: OSI Approved :: Apache Software License",
+    "License :: OSI Approved :: MIT License",
     "Programming Language :: Python :: 3",
-    "Programming Language :: Python :: 3.8",
     "Programming Language :: Python :: 3.9",
     "Programming Language :: Python :: 3.10",
     "Programming Language :: Python :: 3.11",
     "Programming Language :: Python :: 3.12",
     "Topic :: Software Development :: Libraries :: Python Modules",
 ]
-requires-python = ">=3.8"
-dependencies = []
-
-[project.optional-dependencies]
-async = ["aiohttp>=3.9"]
-dev = [
-    "pytest>=7.0",
-    "pytest-asyncio>=0.21",
-    "mypy>=1.0",
-    "black>=23.0",
-    "ruff>=0.1.0",
+dependencies = [
+    "httpx>=0.27.0",
+    "pydantic>=2.5.0",
 ]
 
+[project.optional-dependencies]
+async = ["httpx[asyncio]>=0.27.0"]
+dev = ["pytest>=7.4", "pytest-asyncio>=0.23", "ruff>=0.6"]
+
 [project.urls]
-Homepage = "https://github.com/iflykingc-oss/newPackCV-OCR"
-Documentation = "https://github.com/iflykingc-oss/newPackCV-OCR#readme"
-Repository = "https://github.com/iflykingc-oss/newPackCV-OCR.git"
-Issues = "https://github.com/iflykingc-oss/newPackCV-OCR/issues"
+Homepage = "https://github.com/packcv-ocr/packcv-ocr-python"
+Documentation = "https://docs.packcv-ocr.io"
+Repository = "https://github.com/packcv-ocr/packcv-ocr-python"
+Issues = "https://github.com/packcv-ocr/packcv-ocr-python/issues"
 
 [tool.setuptools.packages.find]
 where = ["."]

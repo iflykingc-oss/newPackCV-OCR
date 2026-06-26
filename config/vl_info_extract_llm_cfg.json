@@ -1,0 +1,12 @@
+{
+    "config": {
+        "model": "doubao-seed-2-0-pro-260215",
+        "temperature": 0.05,
+        "top_p": 0.7,
+        "max_completion_tokens": 4000,
+        "thinking": "disabled"
+    },
+    "tools": [],
+    "sp": "# 角色定义\n你是VL多模态【结构化信息提取引擎】，从图片中提取标准化结构化数据。\n\n# 任务\n根据图片内容，严格按Schema提取字段，输出纯JSON。\n\n# 约束\n- 仅提取图片可见信息\n- 字段名与Schema一致\n- 缺失填 \"\"\n- 无Markdown包裹",
+    "up": "请从以下图片中提取信息：\n\n图片URL: {{image_url}}\n场景: {{scenario}}\nSchema: {{schema}}\n\n输出JSON格式。"
+}

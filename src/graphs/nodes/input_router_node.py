@@ -1,3 +1,52 @@
+<<<<<<< HEAD
+#!/usr/bin/env python3
+"""输入路由节点 - 判断输入类型"""
+import os
+import logging
+from langchain_core.runnables import RunnableConfig
+from langgraph.runtime import Runtime
+from coze_coding_utils.runtime_ctx.context import Context
+from graphs.state import InputRouterInput, InputRouterOutput
+from utils.file.file import FileOps
+
+logger = logging.getLogger(__name__)
+
+
+def input_router_node(
+    state: InputRouterInput,
+    config: RunnableConfig,
+    runtime: Runtime[Context]
+) -> InputRouterOutput:
+    """
+    title: 输入类型路由
+    desc: 根据文件扩展名判断是图片还是文档
+    integrations: 无
+    """
+    ctx = runtime.context
+    
+    input_file = state.input_file
+    file_url = input_file.url
+    
+    # 根据文件扩展名判断类型
+    image_extensions = ['.jpg', '.jpeg', '.png', '.webp', '.bmp', '.gif']
+    document_extensions = ['.pdf', '.docx', '.doc', '.pptx', '.ppt', '.xlsx', '.xls', '.txt', '.md']
+    
+    # 获取文件扩展名
+    file_ext = os.path.splitext(file_url)[1].lower() if file_url else ''
+    
+    # 判断输入类型
+    if file_ext in image_extensions:
+        input_type = "image"
+    elif file_ext in document_extensions:
+        input_type = "document"
+    else:
+        # 默认当作图片处理
+        input_type = "image"
+    
+    logger.info(f"输入路由: {file_url} -> {input_type}")
+    
+    return InputRouterOutput(input_type=input_type)
+=======
 # -*- coding: utf-8 -*-
 """
 输入类型路由节点
@@ -90,3 +139,4 @@ def input_router_node(
         confidence=confidence,
         reason=reason,
     )
+>>>>>>> origin/main

@@ -1,0 +1,38 @@
+{
+  "config": {
+    "model": "doubao-seed-2-0-pro-260215",
+    "temperature": 0.05,
+    "top_p": 0.7,
+    "max_completion_tokens": 4000,
+    "thinking": "disabled"
+  },
+  "tools": [],
+  "sp": "# 角色定义\n你是专业的智能文档/图片信息提取专家，统一处理12+种场景的文档理解任务。\n\n# 核心能力\n1. 多模态理解：能同时理解图片内容+文字信息\n2. Schema驱动：严格按照用户提供的JSON Schema输出结构化数据\n3. 自纠错：能基于OCR文本纠正视觉识别的错误\n4. 高精度：在金融、医疗、法律等关键场景保证95%+准确率\n\n# 任务目标\n基于用户提供的图片、OCR文本、初步提取结果，进行统一、最终的结构化信息提取。\n\n# 工作流上下文\n- Input: 图片URL + 场景描述 + OCR文本(可选) + 初步提取结果(可选)\n- Process:\n  1. 分析图片视觉内容\n  2. 参考OCR文本进行文本校对\n  3. 对照初步提取结果进行优化\n  4. 严格按照Schema输出最终JSON\n- Output: 符合Schema的结构化JSON + 字段级置信度\n\n# 约束与规则\n1. 严格JSON输出，禁止Markdown代码块包裹\n2. 字段名必须与Schema完全一致\n3. 缺失字段填空字符串 \"\"，不输出null\n4. 数字字段输出number类型，不要用字符串\n5. 日期统一使用YYYY-MM-DD格式\n6. 禁止幻觉：未识别的字段不输出虚假数据\n7. 关键字段附带 confidence (0-1) 分数",
+  "up": "## 任务说明\n\n请对以下图片进行**统一结构化信息提取**。\n\n## 输入数据\n\n**图片URL**: {{ image_url }}\n**检测场景**: {{ detected_scenario }}\n**OCR识别文本**: {{ ocr_text }}\n**初步提取结果**: {{ initial_data }}\n\n## 输出Schema（严格按此结构）\n\n{{ schema_json }}\n\n## 输出要求\n\n1. 严格按照上述JSON Schema输出\n2. 字段名与Schema完全一致，禁止新增/删除字段\n3. 缺失字段填空字符串 \"\"\n4. 在最外层额外输出 `extraction_method` (值为\"unified_doc_agent\")\n5. 严格JSON格式，无Markdown包裹\n6. 数字字段必须是number类型\n\n请开始提取：",
+  "fallback_chain": [
+    "doubao-seed-2-0-pro-260215",
+    "kimi-k2-5-260127",
+    "qwen-3-5-plus-260215",
+    "doubao-seed-2-0-lite-260215",
+    "doubao-seed-2-0-mini-260215"
+  ],
+  "few_shot_config": {
+    "enabled": true,
+    "examples_path": "config/scenarios/few_shot_examples.json",
+    "max_examples_per_scenario": 1,
+    "injection_position": "before_user_query"
+  },
+  "retry_policy": {
+    "max_attempts": 3,
+    "initial_interval": 1.0,
+    "backoff_factor": 2.0,
+    "max_interval": 10.0,
+    "jitter": true,
+    "retry_on": ["timeout", "rate_limit", "5xx", "connection_error"]
+  },
+  "timeout_policy": {
+    "run_timeout": 30,
+    "idle_timeout": 15,
+    "connect_timeout": 5
+  }
+}

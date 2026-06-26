@@ -1,0 +1,170 @@
+{
+  "info": {
+    "name": "PackCV API v1",
+    "description": "PackCV 信息提取 SaaS API 完整集合",
+    "schema": "https://schema.getpostman.com/json/collection/v2.1.0/collection.json",
+    "version": "1.0.0"
+  },
+  "auth": {
+    "type": "bearer",
+    "bearer": [
+      {"key": "token", "value": "{{PACKCV_API_KEY}}", "type": "string"}
+    ]
+  },
+  "variable": [
+    {"key": "baseUrl", "value": "http://localhost:9001", "type": "string"},
+    {"key": "PACKCV_API_KEY", "value": "pk_test_demo", "type": "string"},
+    {"key": "tenantId", "value": "demo", "type": "string"}
+  ],
+  "item": [
+    {
+      "name": "工作流",
+      "item": [
+        {
+          "name": "结构化提取",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {"raw": "{{baseUrl}}/api/v1/extract", "host": ["{{baseUrl}}"], "path": ["api", "v1", "extract"]},
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"input_file\": {\n    \"url\": \"https://coze-coding-mockdata.tos-cn-beijing.volces.com/img_ekyv3.png\",\n    \"file_type\": \"image\"\n  },\n  \"scenario\": \"business_license\",\n  \"user_question\": \"提取法人和注册资本\"\n}"
+            }
+          }
+        },
+        {
+          "name": "问答",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {"raw": "{{baseUrl}}/api/v1/qa", "host": ["{{baseUrl}}"], "path": ["api", "v1", "qa"]},
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"input_file\": {\n    \"url\": \"https://coze-coding-mockdata.tos-cn-beijing.volces.com/img_ekyv3.png\",\n    \"file_type\": \"image\"\n  },\n  \"user_question\": \"法定代表人是谁？\"\n}"
+            }
+          }
+        },
+        {
+          "name": "批量提取",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {"raw": "{{baseUrl}}/api/v1/batch", "host": ["{{baseUrl}}"], "path": ["api", "v1", "batch"]},
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"items\": [\n    {\"file_url\": \"https://example.com/1.jpg\", \"scenario\": \"id_card\"},\n    {\"file_url\": \"https://example.com/2.jpg\", \"scenario\": \"invoice\"}\n  ]\n}"
+            }
+          }
+        },
+        {
+          "name": "列出场景",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "{{baseUrl}}/api/v1/scenarios", "host": ["{{baseUrl}}"], "path": ["api", "v1", "scenarios"]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "系统",
+      "item": [
+        {
+          "name": "健康检查",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "{{baseUrl}}/api/v1/system/health", "host": ["{{baseUrl}}"], "path": ["api", "v1", "system", "health"]}
+          }
+        },
+        {
+          "name": "列出所有租户",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "{{baseUrl}}/api/v1/admin/tenants", "host": ["{{baseUrl}}"], "path": ["api", "v1", "admin", "tenants"]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "计费",
+      "item": [
+        {
+          "name": "查询用量",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/api/v1/billing/usage/{{tenantId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["api", "v1", "billing", "usage", "{{tenantId}}"]
+            }
+          }
+        }
+      ]
+    },
+    {
+      "name": "WebHook",
+      "item": [
+        {
+          "name": "订阅",
+          "request": {
+            "method": "POST",
+            "header": [{"key": "Content-Type", "value": "application/json"}],
+            "url": {"raw": "{{baseUrl}}/webhooks/subscribe", "host": ["{{baseUrl}}"], "path": ["webhooks", "subscribe"]},
+            "body": {
+              "mode": "raw",
+              "raw": "{\n  \"tenant_id\": \"{{tenantId}}\",\n  \"url\": \"https://your-server.com/hook\",\n  \"events\": [\"task.completed\", \"billing.usage\"],\n  \"secret\": \"mysecret12345\"\n}"
+            }
+          }
+        },
+        {
+          "name": "投递统计",
+          "request": {
+            "method": "GET",
+            "url": {
+              "raw": "{{baseUrl}}/webhooks/stats/{{tenantId}}",
+              "host": ["{{baseUrl}}"],
+              "path": ["webhooks", "stats", "{{tenantId}}"]
+            }
+          }
+        },
+        {
+          "name": "查看死信队列",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "{{baseUrl}}/webhooks/dlq?limit=50", "host": ["{{baseUrl}}"], "path": ["webhooks", "dlq"], "query": [{"key": "limit", "value": "50"}]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "LLM Provider",
+      "item": [
+        {
+          "name": "列出所有 Provider",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "{{baseUrl}}/providers", "host": ["{{baseUrl}}"], "path": ["providers"]}
+          }
+        },
+        {
+          "name": "路由策略",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "{{baseUrl}}/providers/routing", "host": ["{{baseUrl}}"], "path": ["providers", "routing"]}
+          }
+        }
+      ]
+    },
+    {
+      "name": "监控",
+      "item": [
+        {
+          "name": "Prometheus 指标",
+          "request": {
+            "method": "GET",
+            "url": {"raw": "{{baseUrl}}/metrics", "host": ["{{baseUrl}}"], "path": ["metrics"]}
+          }
+        }
+      ]
+    }
+  ]
+}

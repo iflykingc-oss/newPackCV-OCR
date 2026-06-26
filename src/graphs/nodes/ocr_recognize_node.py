@@ -1,3 +1,66 @@
+<<<<<<< HEAD
+#!/usr/bin/env python3
+"""OCR识别节点 - 多引擎OCR文本识别"""
+import os
+import logging
+from langchain_core.runnables import RunnableConfig
+from langgraph.runtime import Runtime
+from coze_coding_utils.runtime_ctx.context import Context
+from graphs.state import OcrRecognizeInput, OcrRecognizeOutput
+from utils.file.file import File, FileOps
+
+logger = logging.getLogger(__name__)
+
+
+def ocr_recognize_node(
+    state: OcrRecognizeInput,
+    config: RunnableConfig,
+    runtime: Runtime[Context]
+) -> OcrRecognizeOutput:
+    """
+    title: OCR文本识别
+    desc: 使用多引擎OCR识别文本内容，计算识别置信度
+    integrations: OCR引擎
+    """
+    ctx = runtime.context
+    
+    input_file = state.input_file
+    preprocessed_file = state.preprocessed_file
+    ocr_engine_type = state.ocr_engine_type
+    
+    # 使用预处理文件（如有）或原始输入文件
+    file_to_process = preprocessed_file if preprocessed_file else input_file
+    
+    # 使用FileOps提取文本内容
+    try:
+        ocr_result = FileOps.extract_text(file_to_process)
+        
+        # 基于文本长度和内容质量计算置信度
+        # 有效文本越多，置信度越高
+        text_length = len(ocr_result.strip())
+        if text_length > 500:
+            ocr_confidence = 0.95
+        elif text_length > 200:
+            ocr_confidence = 0.90
+        elif text_length > 50:
+            ocr_confidence = 0.85
+        elif text_length > 10:
+            ocr_confidence = 0.70
+        else:
+            ocr_confidence = 0.50
+            
+    except Exception as e:
+        logger.error(f"OCR识别失败: {e}")
+        ocr_result = ""
+        ocr_confidence = 0.0
+    
+    logger.info(f"OCR识别完成: 文本长度={len(ocr_result)}, 置信度={ocr_confidence}")
+    
+    return OcrRecognizeOutput(
+        ocr_result=ocr_result,
+        ocr_confidence=ocr_confidence
+    )
+=======
 # -*- coding: utf-8 -*-
 """
 OCR文字识别节点 - 深度优化版 V2.3
@@ -1196,3 +1259,4 @@ def ocr_recognize_node(
         processing_time=elapsed_time,
         ocr_regions=ocr_regions
     )
+>>>>>>> origin/main

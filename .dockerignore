@@ -1,0 +1,51 @@
+# Git
+.git
+.gitignore
+.gitattributes
+
+# Python
+__pycache__
+*.py[cod]
+*$py.class
+*.so
+.Python
+.venv
+venv/
+env/
+.pytest_cache/
+.coverage
+htmlcov/
+*.egg-info/
+dist/
+build/
+.mypy_cache/
+.pyright_cache/
+.ruff_cache/
+
+# IDE
+.vscode/
+.idea/
+*.swp
+*.swo
+.DS_Store
+
+# 测试/日志
+*.log
+logs/
+tmp/
+temp/
+
+# 文档
+docs/_build/
+site/
+
+# Docker
+Dockerfile.dev
+docker-compose.*.local.yml
+
+# 敏感信息
+.env
+.env.local
+*.pem
+*.key
+secrets/
