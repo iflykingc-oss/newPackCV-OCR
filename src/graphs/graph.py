@@ -1,13 +1,5 @@
 # -*- coding: utf-8 -*-
 """
-<<<<<<< HEAD
-信息提取工作流 - 主图编排
-图片处理路径: input_router → scenario_detector → image_preprocess → ocr_recognize → info_extract → qa_conditional → result_output → END
-"""
-import os
-import json
-import logging
-=======
 多平台OCR包装识别系统 - 主图编排 V6.1
 整合V6.0(MinerU文档引擎/输入路由/条码印章/smart_postprocess) + V6.1(OCR融合/LLM纠错/表格检测/VLM辅助)
 
@@ -16,64 +8,15 @@ import logging
 文档路径: route → input_router → document_parse → result → feishu → END
 """
 
->>>>>>> origin/main
 from typing import Optional
 from langgraph.graph import StateGraph, END
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from coze_coding_utils.runtime_ctx.context import Context
-<<<<<<< HEAD
-
-=======
->>>>>>> origin/main
 from graphs.state import (
     GlobalState,
     GraphInput,
     GraphOutput,
-<<<<<<< HEAD
-    InputRouterInput,
-    InputRouterOutput,
-    ScenarioDetectInput,
-    ScenarioDetectOutput,
-    ImagePreprocessInput,
-    ImagePreprocessOutput,
-    OcrRecognizeInput,
-    OcrRecognizeOutput,
-    InfoExtractInput,
-    InfoExtractOutput,
-    QaAnswerInput,
-    QaAnswerOutput,
-    ResultOutputInput,
-    ResultOutputOutput,
-    QaConditionalInput
-)
-
-# 导入节点函数
-from graphs.nodes.input_router_node import input_router_node
-from graphs.nodes.scenario_detector_node import scenario_detector_node
-from graphs.nodes.image_preprocess_node import image_preprocess_node
-from graphs.nodes.ocr_recognize_node import ocr_recognize_node
-from graphs.nodes.info_extract_node import info_extract_node
-from graphs.nodes.qa_answer_node import qa_answer_node
-from graphs.nodes.result_output_node import result_output_node
-# V7.0 新增节点
-from graphs.nodes.unified_doc_agent_node import unified_doc_agent_node
-from graphs.nodes.smart_postprocess_node import smart_postprocess_node
-
-logger = logging.getLogger(__name__)
-
-
-# ==================== 条件判断函数 ====================
-
-def input_type_condition(state: InputRouterOutput) -> str:
-    """
-    title: 输入类型路由
-    desc: 根据输入文件类型判断处理路径
-    """
-    input_type = getattr(state, 'input_type', 'image')
-    if input_type == "document":
-        return "文档处理"
-=======
     RouteProcessingInput,
     RouteProcessingOutput,
     InputTypeRouteInput,
@@ -145,7 +88,6 @@ def input_type_condition(state: InputTypeRouteInput) -> str:
     input_type = getattr(state, 'input_type', 'image')
     if input_type == "document":
         return "文档解析"
->>>>>>> origin/main
     else:
         return "图片处理"
 
@@ -162,35 +104,6 @@ def qa_conditional(state: QaConditionalInput) -> str:
         return "直接输出"
 
 
-<<<<<<< HEAD
-# ==================== 主图编排 ====================
-
-# 创建状态图
-builder = StateGraph(
-    GlobalState,
-    input_schema=GraphInput,
-    output_schema=GraphOutput
-)
-
-# ===== 添加节点 =====
-builder.add_node("input_router", input_router_node)
-builder.add_node("scenario_detector", scenario_detector_node, metadata={"type": "agent", "llm_cfg": "config/scenario_detect_llm_cfg.json"})
-builder.add_node("image_preprocess", image_preprocess_node)
-builder.add_node("ocr_recognize", ocr_recognize_node)
-builder.add_node("info_extract", info_extract_node, metadata={"type": "agent", "llm_cfg": "config/info_extract_llm_cfg.json"})
-# V7.0 新增节点 - 统一文档Agent（替换ocr+extract）
-builder.add_node("unified_doc_agent", unified_doc_agent_node, metadata={"type": "agent", "llm_cfg": "config/unified_agent_llm_cfg.json"})
-# V7.0 新增节点 - 智能后处理
-builder.add_node("smart_postprocess", smart_postprocess_node)
-builder.add_node("qa_answer", qa_answer_node, metadata={"type": "agent", "llm_cfg": "config/qa_answer_llm_cfg.json"})
-builder.add_node("result_output", result_output_node)
-
-# ===== 设置入口点 =====
-builder.set_entry_point("input_router")
-
-# ===== 添加条件分支 =====
-# 输入类型路由
-=======
 # 创建状态图
 builder = StateGraph(GlobalState, input_schema=GraphInput, output_schema=GraphOutput)
 
@@ -248,19 +161,11 @@ builder.add_conditional_edges(
 )
 
 # ===== V6.0 输入类型路由：图片 vs 文档 =====
->>>>>>> origin/main
 builder.add_conditional_edges(
     source="input_router",
     path=input_type_condition,
     path_map={
         "图片处理": "scenario_detector",
-<<<<<<< HEAD
-        "文档处理": "image_preprocess"  # 文档也经过预处理（预处理节点会判断类型）
-    }
-)
-
-# QA条件判断
-=======
         "文档解析": "document_parse"
     }
 )
@@ -287,7 +192,6 @@ builder.add_edge(["model_extract", "vl_packaging_understanding"], "multi_channel
 builder.add_edge("multi_channel_fusion", "smart_postprocess")
 
 # V6.0 QA条件触发：有用户提问才走QA，否则直出结果
->>>>>>> origin/main
 builder.add_conditional_edges(
     source="smart_postprocess",
     path=qa_conditional,
@@ -296,23 +200,6 @@ builder.add_conditional_edges(
         "直接输出": "result_output"
     }
 )
-<<<<<<< HEAD
-
-# ===== 添加边 =====
-builder.add_edge("scenario_detector", "image_preprocess")
-builder.add_edge("image_preprocess", "ocr_recognize")
-# V7.0 增强路径: ocr_recognize → info_extract → unified_doc_agent → smart_postprocess
-builder.add_edge("ocr_recognize", "info_extract")
-builder.add_edge("info_extract", "unified_doc_agent")
-builder.add_edge("unified_doc_agent", "smart_postprocess")
-builder.add_edge("qa_answer", "result_output")
-builder.add_edge("result_output", END)
-
-# ===== 编译图 =====
-main_graph = builder.compile()
-
-logger.info("信息提取工作流主图已编译完成")
-=======
 builder.add_edge("qa_answer", "result_output")
 
 # 结果输出 → 审计 → 飞书 → END
@@ -329,4 +216,3 @@ builder.add_edge("batch_process", END)
 
 # 编译图
 main_graph = builder.compile()
->>>>>>> origin/main

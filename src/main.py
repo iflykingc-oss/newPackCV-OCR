@@ -4,20 +4,16 @@ import json
 import threading
 import traceback
 import logging
-<<<<<<< HEAD
-import uuid
-from contextlib import asynccontextmanager
-=======
->>>>>>> origin/main
 from typing import Any, Dict, Iterable, AsyncIterable, AsyncGenerator, Optional
 import cozeloop
-import uvicorn
+try:
+    import uvicorn
+except ImportError:
+    uvicorn = None
+    import logging as _l
+    _l.getLogger(__name__).warning("uvicorn not available")
 import time
-<<<<<<< HEAD
-from fastapi import FastAPI, HTTPException, Query, Request
-=======
 from fastapi import FastAPI, HTTPException, Request
->>>>>>> origin/main
 from fastapi.responses import StreamingResponse, JSONResponse
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, END
@@ -29,22 +25,6 @@ from coze_coding_utils.log.write_log import setup_logging, request_context
 from coze_coding_utils.log.config import LOG_LEVEL
 from coze_coding_utils.error.classifier import ErrorClassifier, classify_error
 from coze_coding_utils.helper.stream_runner import AgentStreamRunner, WorkflowStreamRunner,agent_stream_handler,workflow_stream_handler, RunOpt
-<<<<<<< HEAD
-from storage.database.db import get_session, get_engine
-from storage.memory.memory_saver import get_memory_saver
-from storage.database.shared.model import Base
-from coze_coding_utils.async_tasks import (
-    AsyncTaskRuntime,
-    AsyncTaskStorageError,
-    extract_biz_context,
-    parse_deadline_sec,
-)
-from coze_coding_utils.async_tasks import config as async_task_config
-from coze_coding_utils.async_tasks.headers import HEADER_X_RUN_ID as _ASYNC_HEADER_X_RUN_ID
-from coze_coding_utils.runtime_ctx.context import new_context as _new_async_ctx
-from sqlalchemy import event
-=======
->>>>>>> origin/main
 
 setup_logging(
     log_file=LOG_FILE,
@@ -56,11 +36,7 @@ setup_logging(
 )
 
 logger = logging.getLogger(__name__)
-<<<<<<< HEAD
-from coze_coding_utils.helper.agent_helper import to_stream_input, to_client_message
-=======
 from coze_coding_utils.helper.agent_helper import to_stream_input
->>>>>>> origin/main
 from coze_coding_utils.openai.handler import OpenAIChatHandler
 from coze_coding_utils.log.parser import LangGraphParser
 from coze_coding_utils.log.err_trace import extract_core_stack
@@ -82,33 +58,16 @@ class GraphService:
         self._graph = None
         self._graph_lock = threading.Lock()
 
-<<<<<<< HEAD
-    def set_graph(self, graph) -> None:
-        """Inject the compiled graph used by sync endpoints. Called once from
-        lifespan with a no-checkpointer build, so /run /stream_run /node_run
-        never hit the checkpoint DB."""
-        self._graph = graph
-
-    def _get_graph(self, ctx=Context):
-=======
     def _get_graph(self, ctx=Context):
         if graph_helper.is_agent_proj():
             return graph_helper.get_agent_instance("agents.agent", ctx)
 
->>>>>>> origin/main
         if self._graph is not None:
             return self._graph
         with self._graph_lock:
             if self._graph is not None:
                 return self._graph
-<<<<<<< HEAD
-            if graph_helper.is_agent_proj():
-                self._graph = graph_helper.get_agent_instance("agents.agent", ctx)
-            else:
-                self._graph = graph_helper.get_graph_instance("graphs.graph")
-=======
             self._graph = graph_helper.get_graph_instance("graphs.graph")
->>>>>>> origin/main
             return self._graph
 
     @staticmethod
@@ -141,11 +100,7 @@ class GraphService:
             graph = self._get_graph(ctx)
             # custom tracer
             run_config = init_run_config(graph, ctx)
-<<<<<<< HEAD
-            run_config.setdefault("configurable", {})["thread_id"] = ctx.run_id
-=======
             run_config["configurable"] = {"thread_id": ctx.run_id}
->>>>>>> origin/main
 
             # 直接调用，LangGraph会在当前任务上下文中执行
             # 如果当前任务被取消，LangGraph的执行也会被取消
@@ -284,121 +239,12 @@ class GraphService:
 
 
 service = GraphService()
-<<<<<<< HEAD
-
-async_runtime: Optional[AsyncTaskRuntime] = None
-async_graph: Optional[CompiledStateGraph] = None
-
-@asynccontextmanager
-async def lifespan(app: FastAPI):
-    engine = get_engine()
-    @event.listens_for(engine, "connect")
-    def _set_utc(dbapi_conn, _):
-        with dbapi_conn.cursor() as cur:
-            cur.execute("SET TIME ZONE 'UTC'")
-    checkpointer = get_memory_saver()
-    if graph_helper.is_agent_proj():
-        base = graph_helper.get_agent_instance("agents.agent", None)
-        sync_graph = base.builder.compile(checkpointer=checkpointer)
-    else:
-        base = graph_helper.get_graph_instance("graphs.graph")
-        sync_graph = base.builder.compile()
-    global async_graph, async_runtime
-    async_graph = base.builder.compile(checkpointer=checkpointer)
-    service.set_graph(sync_graph)
-    async_runtime = AsyncTaskRuntime(
-        session_factory=get_session, engine=engine,
-        graph=async_graph, checkpointer=checkpointer,
-    )
-    yield
-    if async_runtime is not None:
-        await async_runtime.shutdown()
-
-app = FastAPI(lifespan=lifespan)
-=======
 app = FastAPI()
->>>>>>> origin/main
 
 # OpenAI 兼容接口处理器
 openai_handler = OpenAIChatHandler(service)
 
 
-<<<<<<< HEAD
-@app.post("/async_run")
-async def http_async_run(request: Request) -> dict:
-    try:
-        payload = await request.json()
-    except json.JSONDecodeError as e:
-        logger.error(f"JSON decode error in http_async_run: {e}")
-        raise HTTPException(status_code=400, detail=f"Invalid JSON: {extract_core_stack()}")
-    try:
-        deadline_sec = parse_deadline_sec(request.headers)
-    except ValueError as e:
-        raise HTTPException(status_code=400, detail=str(e))
-
-    # 一个 ID 走到底：task_id == run_id == thread_id == ctx.run_id == coze_run_id。
-    # 优先用上游 x-run-id；没传就生成 UUID。
-    run_id = request.headers.get(_ASYNC_HEADER_X_RUN_ID) or uuid.uuid4().hex
-
-    # ctx 在 handler scope 构造，与同步 /run 路径一致；后面 new_context 默认会
-    # 给 run_id 一个新 UUID，同步路径也是显式覆盖（main.py /run 处），这里同理。
-    ctx = _new_async_ctx(method="async_run", headers=request.headers)
-    ctx.run_id = run_id
-    request_context.set(ctx)  # 与其他 HTTP endpoint 一致：让日志组件拿到 run_id 等信息
-    run_config = init_run_config(async_graph, ctx)
-    run_config["recursion_limit"] = async_task_config.RECURSION_LIMIT
-    run_config.setdefault("configurable", {})["thread_id"] = run_id
-
-    biz_context = extract_biz_context(request.headers) or {}
-    if graph_helper.is_agent_proj() and not (isinstance(payload, dict) and payload.get("messages")):
-        try:
-            client_msg, _ = to_client_message(payload)
-            payload = to_stream_input(client_msg)
-        except Exception as e:
-            error_response = service.error_classifier.get_error_response(
-                e, {"node_name": "http_async_run", "run_id": run_id})
-            logger.error(
-                f"failed to convert agent payload in http_async_run: "
-                f"[{error_response['error_code']}] {error_response['error_message']}, "
-                f"traceback: {traceback.format_exc()}", exc_info=True
-            )
-            raise HTTPException(
-                status_code=400,
-                detail={
-                    "error_code": error_response["error_code"],
-                    "error_message": error_response["error_message"],
-                    "stack_trace": extract_core_stack(),
-                },
-            )
-
-    try:
-        return await async_runtime.submit(
-            task_id=run_id,
-            payload=payload,
-            biz_context=biz_context,
-            deadline_sec=deadline_sec,
-            run_config=run_config,
-            ctx=ctx,
-        )
-    except AsyncTaskStorageError as e:
-        raise HTTPException(status_code=503,
-                            detail=f"async-task storage unavailable: {e}")
-
-
-@app.get("/task/{task_id}")
-async def http_get_task(task_id: str) -> dict:
-    try:
-        row = await async_runtime.get(task_id)
-    except AsyncTaskStorageError as e:
-        raise HTTPException(status_code=503,
-                            detail=f"async-task storage unavailable: {e}")
-    if row is None:
-        raise HTTPException(status_code=404, detail="task not found")
-    return row
-
-
-=======
->>>>>>> origin/main
 HEADER_X_RUN_ID = "x-run-id"
 @app.post("/run")
 async def http_run(request: Request) -> Dict[str, Any]:

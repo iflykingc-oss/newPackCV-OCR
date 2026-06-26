@@ -13,18 +13,33 @@ import logging
 from typing import Optional, Dict, Any, Callable
 from functools import wraps
 
-from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
-from opentelemetry.sdk.resources import Resource, SERVICE_NAME, SERVICE_VERSION
-from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from opentelemetry.trace import Status, StatusCode, Span
+try:
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+    from opentelemetry.sdk.resources import Resource, SERVICE_NAME, SERVICE_VERSION
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    OTEL_AVAILABLE = True
+except ImportError:
+    OTEL_AVAILABLE = False
+if OTEL_AVAILABLE:
+    from opentelemetry.trace import Status, StatusCode, Span
+else:
+    # no-op stubs
+    class Status:
+        OK = "ok"
+        ERROR = "error"
+    class StatusCode:
+        OK = 0
+        ERROR = 1
+    class Span:
+        pass
 
 logger = logging.getLogger(__name__)
 
 # 全局 tracer
-_tracer: Optional[trace.Tracer] = None
-_provider: Optional[TracerProvider] = None
+_tracer: Any = None
+_provider: Any = None
 
 
 def init_tracing(
@@ -33,7 +48,7 @@ def init_tracing(
     exporter_type: str = "console",
     otlp_endpoint: Optional[str] = None,
     sample_rate: float = 1.0
-) -> trace.Tracer:
+) -> Any:
     """初始化 OpenTelemetry 追踪
     
     Args:
@@ -49,6 +64,11 @@ def init_tracing(
     global _tracer, _provider
     
     if _tracer is not None:
+        return _tracer
+    
+    if not OTEL_AVAILABLE:
+        logger.info("OpenTelemetry not available, using no-op tracer")
+        _tracer = NoOpTracer()
         return _tracer
     
     # 创建 Resource
@@ -89,7 +109,7 @@ def init_tracing(
     return _tracer
 
 
-def get_tracer() -> trace.Tracer:
+def get_tracer() -> Any:
     """获取全局 Tracer"""
     global _tracer
     if _tracer is None:
@@ -99,6 +119,9 @@ def get_tracer() -> trace.Tracer:
 
 def instrument_fastapi(app):
     """自动注入 FastAPI 追踪"""
+    if not OTEL_AVAILABLE:
+        logger.info("OpenTelemetry not available, skipping FastAPI instrumentation")
+        return
     FastAPIInstrumentor.instrument_app(app)
     logger.info("FastAPI instrumented for OpenTelemetry")
 

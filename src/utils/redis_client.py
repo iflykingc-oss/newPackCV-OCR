@@ -9,8 +9,14 @@
 import os
 from typing import Any, Optional
 
-import redis
-from redis.connection import ConnectionPool
+try:
+    import redis
+    from redis.connection import ConnectionPool
+    REDIS_AVAILABLE = True
+except ImportError:
+    REDIS_AVAILABLE = False
+    redis = None
+    ConnectionPool = None
 
 
 class TenantRedisClient:
@@ -20,9 +26,11 @@ class TenantRedisClient:
     """
 
     _instance: Optional["TenantRedisClient"] = None
-    _pool: Optional[ConnectionPool] = None
+    _pool: Any = None
 
     def __new__(cls) -> "TenantRedisClient":
+        if not REDIS_AVAILABLE:
+            raise ImportError("redis package not installed. Install with: uv add redis")
         if cls._instance is None:
             cls._instance = super().__new__(cls)
             cls._init_pool()
@@ -31,6 +39,8 @@ class TenantRedisClient:
     @classmethod
     def _init_pool(cls) -> None:
         """初始化连接池（单例）"""
+        if not REDIS_AVAILABLE:
+            raise ImportError("redis package not installed")
         redis_url = os.getenv("REDIS_URL", "redis://localhost:6379/0")
         max_connections = int(os.getenv("REDIS_MAX_CONNECTIONS", "50"))
         socket_timeout = float(os.getenv("REDIS_SOCKET_TIMEOUT", "5"))
@@ -44,8 +54,10 @@ class TenantRedisClient:
         )
 
     @property
-    def client(self) -> redis.Redis:
+    def client(self) -> Any:
         """获取Redis客户端"""
+        if not REDIS_AVAILABLE:
+            raise ImportError("redis package not installed")
         if self._pool is None:
             self._init_pool()
         return redis.Redis(connection_pool=self._pool)
@@ -158,4 +170,8 @@ class TenantRedisClient:
 
 
 # 全局单例
-redis_client = TenantRedisClient()
+try:
+    redis_client = TenantRedisClient()
+except ImportError:
+    # redis未安装, 创建None占位; 使用方应检查REDIS_AVAILABLE
+    redis_client = None

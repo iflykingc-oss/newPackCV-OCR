@@ -1,6 +1,3 @@
-<<<<<<< HEAD
-"""API中间件模块"""
-=======
 # -*- coding: utf-8 -*-
 """
 HTTP API接口层
@@ -397,4 +394,3 @@ class PackCVAPIServer:
         def health():
             """健康检查"""
             return jsonify({"status": "healthy", "timestamp": datetime.now().isoformat()})
->>>>>>> origin/main

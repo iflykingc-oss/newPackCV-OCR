@@ -1,11 +1,3 @@
-<<<<<<< HEAD
-#!/usr/bin/env python3
-"""多通道融合节点 - 实现OCR和VL多模态结果的加权融合"""
-import os
-import json
-import logging
-from typing import Dict, Any, List, Optional
-=======
 # -*- coding: utf-8 -*-
 """
 多通道融合节点 (Multi-Channel Fusion Node) - V5.3
@@ -20,7 +12,6 @@ import json
 import logging
 from typing import Optional, List, Dict, Any
 from pydantic import BaseModel, Field
->>>>>>> origin/main
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from coze_coding_utils.runtime_ctx.context import Context
@@ -29,158 +20,6 @@ from graphs.state import MultiChannelFusionInput, MultiChannelFusionOutput
 logger = logging.getLogger(__name__)
 
 
-<<<<<<< HEAD
-# 字段级置信度权重配置：不同字段在不同通道下的可靠性
-FIELD_CHANNEL_WEIGHTS: Dict[str, Dict[str, float]] = {
-    # OCR通道擅长结构化文本；VL通道擅长视觉理解
-    "品牌": {"ocr": 0.5, "vl": 0.5},
-    "品名": {"ocr": 0.6, "vl": 0.4},
-    "规格": {"ocr": 0.7, "vl": 0.3},
-    "生产日期": {"ocr": 0.85, "vl": 0.15},
-    "保质期": {"ocr": 0.85, "vl": 0.15},
-    "厂家": {"ocr": 0.7, "vl": 0.3},
-    "批号": {"ocr": 0.9, "vl": 0.1},
-    "许可证号": {"ocr": 0.9, "vl": 0.1},
-    "金额": {"ocr": 0.9, "vl": 0.1},
-    "日期": {"ocr": 0.85, "vl": 0.15},
-    "证号": {"ocr": 0.9, "vl": 0.1},
-    "姓名": {"ocr": 0.6, "vl": 0.4},
-    "标题": {"ocr": 0.5, "vl": 0.5},
-    "摘要": {"ocr": 0.3, "vl": 0.7},
-    "关键字": {"ocr": 0.3, "vl": 0.7},
-    "正文": {"ocr": 0.6, "vl": 0.4},
-}
-
-
-def multi_channel_fusion_node(
-    state: MultiChannelFusionInput,
-    config: RunnableConfig,
-    runtime: Runtime[Context],
-) -> MultiChannelFusionOutput:
-    """
-    title: 多通道融合
-    desc: 对OCR传统管线和VL多模态的结果做字段级加权融合，实现置信度加权、跨通道冲突解决、互信息校验。
-    integrations: 无外部集成
-    """
-    ctx = runtime.context
-    
-    ocr_result = state.ocr_result
-    vl_result = state.vl_result
-    detected_scenario = state.detected_scenario
-    
-    # 解析OCR结果
-    ocr_fields: Dict[str, str] = {}
-    ocr_confidence: float = 0.0
-    
-    if ocr_result and isinstance(ocr_result, dict):
-        ocr_fields = ocr_result.get("extracted_fields", {})
-        ocr_confidence = ocr_result.get("confidence", 0.0)
-    elif ocr_result and isinstance(ocr_result, str):
-        try:
-            ocr_data = json.loads(ocr_result)
-            ocr_fields = ocr_data.get("extracted_fields", {})
-            ocr_confidence = ocr_data.get("confidence", 0.0)
-        except json.JSONDecodeError:
-            logger.warning("OCR结果JSON解析失败")
-    
-    # 解析VL结果
-    vl_fields: Dict[str, str] = {}
-    vl_confidence: float = 0.0
-    
-    if vl_result and isinstance(vl_result, dict):
-        vl_fields = vl_result.get("extracted_fields", {})
-        vl_confidence = vl_result.get("confidence", 0.0)
-    elif vl_result and isinstance(vl_result, str):
-        try:
-            vl_data = json.loads(vl_result)
-            vl_fields = vl_data.get("extracted_fields", {})
-            vl_confidence = vl_data.get("confidence", 0.0)
-        except json.JSONDecodeError:
-            logger.warning("VL结果JSON解析失败")
-    
-    logger.info(f"多通道融合: ocr_confidence={ocr_confidence:.2f}, vl_confidence={vl_confidence:.2f}")
-    
-    # 字段级融合逻辑
-    fused_fields: Dict[str, str] = {}
-    field_confidence_scores: Dict[str, float] = {}
-    conflict_resolved: List[str] = []
-    
-    # 获取所有可能的字段名（合并OCR和VL的字段）
-    all_fields = set(ocr_fields.keys()) | set(vl_fields.keys())
-    
-    for field_name in all_fields:
-        ocr_value = ocr_fields.get(field_name, "")
-        vl_value = vl_fields.get(field_name, "")
-        
-        # 获取字段权重配置（如果字段没有特定权重，使用默认权重）
-        weights = FIELD_CHANNEL_WEIGHTS.get(field_name, {"ocr": 0.5, "vl": 0.5})
-        
-        # 计算加权值
-        if ocr_value and vl_value:
-            # 两个通道都有值：检查是否冲突
-            if ocr_value.strip() == vl_value.strip():
-                # 值一致：直接使用
-                fused_fields[field_name] = ocr_value.strip()
-                field_confidence_scores[field_name] = (ocr_confidence + vl_confidence) / 2.0
-            else:
-                # 值冲突：根据权重选择
-                ocr_weight = weights.get("ocr", 0.5) * ocr_confidence
-                vl_weight = weights.get("vl", 0.5) * vl_confidence
-                
-                if ocr_weight >= vl_weight:
-                    fused_fields[field_name] = ocr_value.strip()
-                    field_confidence_scores[field_name] = ocr_weight
-                else:
-                    fused_fields[field_name] = vl_value.strip()
-                    field_confidence_scores[field_name] = vl_weight
-                
-                conflict_resolved.append(field_name)
-                logger.info(f"字段冲突解决: {field_name} -> OCR:{ocr_value} vs VL:{vl_value}, 选择: {fused_fields[field_name]}")
-        
-        elif ocr_value:
-            # 只有OCR有值
-            fused_fields[field_name] = ocr_value.strip()
-            field_confidence_scores[field_name] = weights.get("ocr", 0.5) * ocr_confidence
-        
-        elif vl_value:
-            # 只有VL有值
-            fused_fields[field_name] = vl_value.strip()
-            field_confidence_scores[field_name] = weights.get("vl", 0.5) * vl_confidence
-        
-        else:
-            # 两个通道都没有值
-            fused_fields[field_name] = ""
-            field_confidence_scores[field_name] = 0.0
-    
-    # 计算整体融合置信度
-    if field_confidence_scores:
-        overall_confidence = sum(field_confidence_scores.values()) / len(field_confidence_scores)
-    else:
-        overall_confidence = 0.0
-    
-    # 构建融合后的结构化数据
-    fused_data: Dict[str, Any] = {
-        "scenario": detected_scenario,
-        "extracted_fields": fused_fields,
-        "confidence": overall_confidence,
-        "fusion_metadata": {
-            "ocr_confidence": ocr_confidence,
-            "vl_confidence": vl_confidence,
-            "field_confidence_scores": field_confidence_scores,
-            "conflict_resolved": conflict_resolved,
-            "fusion_method": "weighted_fusion"
-        }
-    }
-    
-    logger.info(f"多通道融合完成: overall_confidence={overall_confidence:.2f}, conflicts_resolved={len(conflict_resolved)}")
-    
-    return MultiChannelFusionOutput(
-        fused_data=fused_data,
-        overall_confidence=overall_confidence,
-        field_confidence_scores=field_confidence_scores,
-        conflict_resolved=conflict_resolved
-    )
-=======
 # 字段权重配置：不同字段在不同通道下的可靠性
 FIELD_CHANNEL_WEIGHTS: Dict[str, Dict[str, float]] = {
     # OCR通道擅长结构化文本；VL通道擅长视觉理解
@@ -383,4 +222,3 @@ def multi_channel_fusion_node(
         fusion_decisions=field_decisions[:20],  # 限制大小
         fusion_method="weighted_score"
     )
->>>>>>> origin/main

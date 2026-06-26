@@ -1,12 +1,3 @@
-<<<<<<< HEAD
-#!/usr/bin/env python3
-"""结果输出节点 - 整理最终输出"""
-import os
-import json
-import logging
-from datetime import datetime
-from typing import Dict, Any
-=======
 # -*- coding: utf-8 -*-
 """
 结果输出节点
@@ -20,21 +11,15 @@ import logging
 from typing import Dict, Any, Optional
 from io import BytesIO
 
->>>>>>> origin/main
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from coze_coding_utils.runtime_ctx.context import Context
 from graphs.state import ResultOutputInput, ResultOutputOutput
-<<<<<<< HEAD
-=======
 from coze_coding_dev_sdk.s3 import S3SyncStorage
->>>>>>> origin/main
 
 logger = logging.getLogger(__name__)
 
 
-<<<<<<< HEAD
-=======
 def _get_s3_storage() -> S3SyncStorage:
     """获取S3对象存储客户端"""
     return S3SyncStorage(
@@ -113,7 +98,6 @@ def export_to_pdf(data: Dict[str, Any]) -> Optional[bytes]:
         return None
 
 
->>>>>>> origin/main
 def result_output_node(
     state: ResultOutputInput,
     config: RunnableConfig,
@@ -121,32 +105,6 @@ def result_output_node(
 ) -> ResultOutputOutput:
     """
     title: 结果输出
-<<<<<<< HEAD
-    desc: 整理提取结果并生成最终输出
-    integrations: 无
-    """
-    ctx = runtime.context
-
-    structured_data = state.structured_data
-    qa_answer = state.qa_answer or ""
-
-    # 整理最终输出
-    final_result = {
-        "extracted_data": structured_data,
-        "qa_answer": qa_answer if qa_answer else None,
-        "status": "success",
-        "timestamp": datetime.now().isoformat(),
-        "metadata": {
-            "scenario": state.detected_scenario if hasattr(state, 'detected_scenario') else "",
-            "model_used": state.model_used if hasattr(state, 'model_used') else "",
-            "api_call_count": state.api_call_count if hasattr(state, 'api_call_count') else 0
-        }
-    }
-
-    logger.info(f"结果输出完成: {len(str(structured_data))} bytes")
-
-    return ResultOutputOutput(final_result=final_result)
-=======
     desc: 将结构化数据格式化输出，支持JSON/Excel/PDF格式，并上传到对象存储
     integrations: 对象存储
     """
@@ -264,4 +222,3 @@ def _push_to_platform(platform: str, data: Dict[str, Any]) -> Dict[str, Any]:
     else:
         logger.info(f"未知平台: {platform}，跳过推送")
     return result
->>>>>>> origin/main

@@ -1,266 +1,15 @@
 # -*- coding: utf-8 -*-
 """
-<<<<<<< HEAD
-信息提取工作流 - 状态定义
-包含全局状态、图出入参、节点出入参定义
-"""
-=======
 多平台OCR包装识别系统 - 状态定义
 包含全局状态、图出入参、节点出入参定义
 """
 
->>>>>>> origin/main
 from typing import Literal, Optional, List, Dict, Any
 from pydantic import BaseModel, Field
 from utils.file.file import File
 
 
 # ==================== 全局状态 ====================
-<<<<<<< HEAD
-class GlobalState(BaseModel):
-    """全局状态定义 - 包含工作流流转的所有数据"""
-    # 输入数据
-    input_file: File = Field(
-        default_factory=lambda: File(url="", file_type="default"),
-        description="输入文件（图片或文档）"
-    )
-    processing_mode: Literal["single", "batch"] = Field(
-        default="single",
-        description="处理模式：single（单文件）或 batch（批量）"
-    )
-    
-    # OCR配置
-    ocr_engine_type: Literal["builtin", "smart", "auto"] = Field(
-        default="auto",
-        description="OCR引擎类型：auto=SmartOCR路由, builtin=本地引擎"
-    )
-    
-    # 模型配置
-    model_type: Literal["extract", "qa"] = Field(
-        default="extract",
-        description="模型调用类型"
-    )
-    
-    # 中间状态
-    input_type: Literal["image", "document"] = Field(
-        default="image",
-        description="输入类型"
-    )
-    detected_scenario: str = Field(
-        default="general",
-        description="检测到的场景类型"
-    )
-    preprocessed_file: Optional[File] = Field(
-        default=None,
-        description="预处理后的文件"
-    )
-    ocr_result: str = Field(
-        default="",
-        description="OCR识别结果"
-    )
-    ocr_confidence: float = Field(
-        default=0.0,
-        description="OCR识别置信度"
-    )
-    
-    # 提取结果
-    structured_data: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="结构化提取数据"
-    )
-    
-    # 用户交互
-    user_question: str = Field(
-        default="",
-        description="用户提问"
-    )
-    qa_answer: str = Field(
-        default="",
-        description="问答结果"
-    )
-    
-    # 输出
-    final_result: Dict[str, Any] = Field(
-        default_factory=dict,
-        description="最终输出结果"
-    )
-
-
-# ==================== 图输入输出 ====================
-class GraphInput(BaseModel):
-    """工作流输入参数"""
-    input_file: File = Field(
-        ...,
-        description="输入文件（图片或文档）"
-    )
-    user_question: str = Field(
-        default="",
-        description="用户提问（可选）"
-    )
-
-
-class GraphOutput(BaseModel):
-    """工作流输出参数"""
-    structured_data: Dict[str, Any] = Field(
-        ...,
-        description="提取的结构化数据"
-    )
-    qa_answer: str = Field(
-        default="",
-        description="问答结果"
-    )
-
-
-# ==================== 节点状态定义 ====================
-
-# 输入路由节点
-class InputRouterInput(BaseModel):
-    """输入路由节点输入"""
-    input_file: File = Field(..., description="输入文件")
-
-
-class InputRouterOutput(BaseModel):
-    """输入路由节点输出"""
-    input_type: Literal["image", "document"] = Field(..., description="输入类型")
-
-
-# 场景检测节点
-class ScenarioDetectInput(BaseModel):
-    """场景检测节点输入"""
-    input_file: File = Field(..., description="输入文件")
-    ocr_engine_type: str = Field(default="auto", description="OCR引擎类型")
-
-
-class ScenarioDetectOutput(BaseModel):
-    """场景检测节点输出"""
-    detected_scenario: str = Field(..., description="检测到的场景")
-    confidence: float = Field(default=0.0, description="置信度")
-
-
-# 图片预处理节点
-class ImagePreprocessInput(BaseModel):
-    """图片预处理节点输入"""
-    input_file: File = Field(..., description="输入图片")
-
-
-class ImagePreprocessOutput(BaseModel):
-    """图片预处理节点输出"""
-    preprocessed_file: File = Field(..., description="预处理后的图片")
-
-
-# OCR识别节点
-class OcrRecognizeInput(BaseModel):
-    """OCR识别节点输入"""
-    input_file: File = Field(..., description="原始输入文件")
-    preprocessed_file: Optional[File] = Field(default=None, description="预处理的文件（可选）")
-    ocr_engine_type: str = Field(default="auto", description="OCR引擎类型")
-
-
-class OcrRecognizeOutput(BaseModel):
-    """OCR识别节点输出"""
-    ocr_result: str = Field(..., description="OCR识别文本")
-    ocr_confidence: float = Field(default=0.0, description="置信度")
-
-
-# 信息提取节点
-class InfoExtractInput(BaseModel):
-    """信息提取节点输入"""
-    ocr_result: str = Field(..., description="OCR识别文本")
-    detected_scenario: str = Field(default="general_document", description="场景类型（默认为通用文档）")
-
-
-class InfoExtractOutput(BaseModel):
-    """信息提取节点输出"""
-    structured_data: Dict[str, Any] = Field(..., description="结构化数据")
-
-
-# QA问答节点
-class QaAnswerInput(BaseModel):
-    """QA问答节点输入"""
-    structured_data: Dict[str, Any] = Field(..., description="结构化数据")
-    user_question: str = Field(..., description="用户提问")
-
-
-class QaAnswerOutput(BaseModel):
-    """QA问答节点输出"""
-    qa_answer: str = Field(..., description="问答结果")
-
-
-# 结果输出节点
-class ResultOutputInput(BaseModel):
-    """结果输出节点输入"""
-    structured_data: Dict[str, Any] = Field(..., description="结构化数据")
-    qa_answer: str = Field(default="", description="问答结果")
-    detected_scenario: str = Field(default="", description="检测场景")
-    model_used: str = Field(default="", description="使用的模型")
-    api_call_count: int = Field(default=0, description="API调用次数")
-
-
-class ResultOutputOutput(BaseModel):
-    """结果输出节点输出"""
-    final_result: Dict[str, Any] = Field(..., description="最终结果")
-
-
-# QA条件判断
-class QaConditionalInput(BaseModel):
-    """QA条件判断输入"""
-    user_question: str = Field(..., description="用户提问")
-
-
-# ==================== VL多模态节点状态 ====================
-
-# VL场景检测节点
-class VlScenarioDetectInput(BaseModel):
-    """VL场景检测节点输入"""
-    input_file: File = Field(..., description="输入文件")
-
-
-class VlScenarioDetectOutput(BaseModel):
-    """VL场景检测节点输出"""
-    detected_scenario: str = Field(..., description="检测到的场景类型")
-    confidence: float = Field(default=0.0, description="检测置信度")
-    detection_reason: str = Field(default="", description="检测理由")
-
-
-# VL信息提取节点
-class VlInfoExtractInput(BaseModel):
-    """VL信息提取节点输入"""
-    input_file: File = Field(..., description="输入文件")
-    detected_scenario: str = Field(default="general_document", description="场景类型")
-
-
-class VlInfoExtractOutput(BaseModel):
-    """VL信息提取节点输出"""
-    structured_data: Dict[str, Any] = Field(..., description="结构化数据")
-    extraction_confidence: float = Field(default=0.0, description="提取置信度")
-    fields_attempted: int = Field(default=0, description="尝试提取的字段数")
-    fields_extracted: int = Field(default=0, description="成功提取的字段数")
-    extraction_method: str = Field(default="vl_multimodal", description="提取方法")
-
-
-# 批量处理节点
-class BatchProcessInput(BaseModel):
-    """批量处理节点输入"""
-    images: List[File] = Field(default_factory=list, description="图片列表")
-    max_workers: int = Field(default=10, description="最大并行数")
-
-
-class BatchProcessOutput(BaseModel):
-    """批量处理节点输出"""
-    batch_results: List[Dict[str, Any]] = Field(default_factory=list, description="批量处理结果列表")
-    total_count: int = Field(default=0, description="总数量")
-    success_count: int = Field(default=0, description="成功数量")
-    failed_count: int = Field(default=0, description="失败数量")
-    batch_confidence: float = Field(default=0.0, description="批量置信度")
-
-
-# 多通道融合节点
-class MultiChannelFusionInput(BaseModel):
-    """多通道融合节点输入"""
-    ocr_result: Dict[str, Any] = Field(default_factory=dict, description="OCR提取结果")
-    vl_result: Dict[str, Any] = Field(default_factory=dict, description="VL提取结果")
-    detected_scenario: str = Field(default="general_document", description="场景类型")
-=======
 
 class GlobalState(BaseModel):
     """全局状态定义 - 包含工作流流转的所有数据"""
@@ -406,58 +155,10 @@ class MultiChannelFusionInput(BaseModel):
     fusion_method: str = Field(default="weighted_score", description="融合方法：weighted_score/consensus/voting")
     # V5.9 内嵌检测：条码+印章（在融合节点内部并行执行，无需额外图节点）
     package_image: Optional[File] = Field(default=None, description="原图（用于内嵌条码/印章检测）")
->>>>>>> origin/main
 
 
 class MultiChannelFusionOutput(BaseModel):
     """多通道融合节点输出"""
-<<<<<<< HEAD
-    fused_data: Dict[str, Any] = Field(..., description="融合后的数据")
-    overall_confidence: float = Field(default=0.0, description="整体置信度")
-    field_confidence_scores: Dict[str, float] = Field(default_factory=dict, description="字段级置信度")
-    conflict_resolved: List[str] = Field(default_factory=list, description="已解决的冲突字段")
-
-
-# 路由判断状态
-class RouteProcessingInput(BaseModel):
-    """处理模式路由输入"""
-    images: Optional[List[File]] = Field(default=None, description="图片列表")
-
-
-class RouteProcessingOutput(BaseModel):
-    """处理模式路由输出"""
-    processing_mode: str = Field(default="single", description="处理模式")
-
-
-# ==================== V7.0 新增节点状态定义 ====================
-
-# 统一文档Agent节点（V7.0核心）
-class UnifiedDocAgentInput(BaseModel):
-    """统一文档Agent输入"""
-    input_file: File = Field(..., description="输入文件")
-    detected_scenario: str = Field(default="general_document", description="检测到的场景")
-    model_override: Optional[str] = Field(default=None, description="模型覆盖")
-    ocr_context: str = Field(default="", description="OCR文本上下文（可选）")
-    pre_extracted_data: Optional[Dict[str, Any]] = Field(default=None, description="预提取的数据（可选）")
-
-
-class UnifiedDocAgentOutput(BaseModel):
-    """统一文档Agent输出"""
-    structured_data: Dict[str, Any] = Field(default_factory=dict, description="结构化数据")
-    scenario_used: str = Field(default="", description="使用的场景")
-    model_used: str = Field(default="", description="使用的模型")
-    confidence: float = Field(default=0.0, description="整体置信度")
-    tokens_used: int = Field(default=0, description="消耗Token数")
-    cost: float = Field(default=0.0, description="API成本(美元)")
-    parse_success: bool = Field(default=False, description="JSON解析是否成功")
-
-
-# 智能后处理节点（V7.0新增）
-class SmartPostprocessInput(BaseModel):
-    """智能后处理节点输入"""
-    structured_data: Dict[str, Any] = Field(default_factory=dict, description="原始结构化数据")
-    scenario_used: str = Field(default="", description="场景类型")
-=======
     fused_structured_data: Dict[str, Any] = Field(default_factory=dict, description="融合后的结构化数据")
     fused_confidence: float = Field(default=0.0, description="融合后的整体置信度")
     fusion_field_count: int = Field(default=0, description="参与融合的字段数")
@@ -635,18 +336,10 @@ class SmartPostprocessInput(BaseModel):
     raw_text: str = Field(default="", description="OCR原始文本")
     product_type: str = Field(default="", description="产品类型")
     detected_category: str = Field(default="", description="上游已检测的品类（可选）")
->>>>>>> origin/main
 
 
 class SmartPostprocessOutput(BaseModel):
     """智能后处理节点输出"""
-<<<<<<< HEAD
-    structured_data: Dict[str, Any] = Field(default_factory=dict, description="后处理后的数据")
-    confidence: float = Field(default=0.0, description="整体置信度")
-    anomalies: List[Dict[str, Any]] = Field(default_factory=list, description="异常列表")
-    field_confidences: Dict[str, float] = Field(default_factory=dict, description="字段级置信度")
-    validation_errors: List[Dict[str, str]] = Field(default_factory=list, description="校验错误")
-=======
     detected_category: str = Field(default="其他", description="检测到的产品品类")
     template_name: str = Field(default="其他", description="使用的模板名")
     required_fields: List[str] = Field(default_factory=list, description="品类必填字段")
@@ -683,6 +376,32 @@ class ImagePreprocessOutput(BaseModel):
 
 
 # ==================== OCR识别节点 ====================
+
+class VlScenarioDetectInput(BaseModel):
+    """VL多模态场景检测节点输入"""
+    input_file: File = Field(..., description="输入图片文件")
+    package_image: Optional[File] = Field(default=None, description="原始包装图片（备选）")
+
+
+class VlScenarioDetectOutput(BaseModel):
+    """VL多模态场景检测节点输出"""
+    detected_scenario: str = Field(default="", description="检测到的场景类型")
+    confidence: float = Field(default=0.0, description="检测置信度")
+    raw_output: str = Field(default="", description="原始模型输出")
+
+
+class VlInfoExtractInput(BaseModel):
+    """VL多模态信息提取节点输入"""
+    input_file: File = Field(..., description="输入图片文件")
+    package_image: Optional[File] = Field(default=None, description="原始包装图片（备选）")
+    detected_scenario: str = Field(default="general_document", description="检测到的场景类型")
+
+
+class VlInfoExtractOutput(BaseModel):
+    """VL多模态信息提取节点输出"""
+    structured_data: Dict[str, Any] = Field(default_factory=dict, description="提取的结构化数据")
+    raw_output: str = Field(default="", description="原始模型输出")
+
 
 class OCRRecognizeInput(BaseModel):
     """OCR识别节点输入"""
@@ -769,6 +488,18 @@ class CorrectTextOutput(BaseModel):
 
 
 # ==================== 语义问答节点 ====================
+
+class InfoExtractInput(BaseModel):
+    """信息提取节点输入"""
+    ocr_result: str = Field(default="", description="OCR识别的文本")
+    detected_scenario: str = Field(default="general_document", description="检测到的场景类型")
+    user_question: Optional[str] = Field(default="", description="用户附加提问")
+
+
+class InfoExtractOutput(BaseModel):
+    """信息提取节点输出"""
+    structured_data: Dict[str, Any] = Field(default_factory=dict, description="提取的结构化数据")
+
 
 class QaAnswerInput(BaseModel):
     """语义问答节点输入"""
@@ -1560,4 +1291,25 @@ class ApiKeyCreateResponse(BaseModel):
     user_id: str = Field(..., description="用户ID")
     created_at: str = Field(..., description="创建时间")
     expires_at: str = Field(..., description="过期时间")
->>>>>>> origin/main
+
+# ==================== V7.0 统一Agent节点 ====================
+
+class UnifiedDocAgentInput(BaseModel):
+    """统一文档Agent节点输入"""
+    input_file: File = Field(..., description="输入文件（图片/PDF/文档）")
+    scenario: str = Field(default="auto", description="指定场景类型 (auto=自动检测)")
+    user_prompt: Optional[str] = Field(default=None, description="用户自定义指令")
+    model_override: Optional[str] = Field(default=None, description="覆盖使用的模型")
+    ocr_context: Optional[str] = Field(default=None, description="OCR辅助参考文本")
+    pre_extracted_data: Optional[Dict[str, Any]] = Field(default=None, description="预提取的数据（供补充完善）")
+    detected_scenario: str = Field(default="", description="自动检测的场景类型")
+
+
+class UnifiedDocAgentOutput(BaseModel):
+    """统一文档Agent节点输出"""
+    structured_data: Dict[str, Any] = Field(default_factory=dict, description="提取的结构化数据")
+    raw_output: str = Field(default="", description="原始模型输出")
+    detected_scenario: str = Field(default="", description="自动检测的场景类型")
+    confidence: float = Field(default=0.0, description="检测置信度")
+    engine_used: str = Field(default="", description="使用的引擎类型")
+    execution_time_ms: float = Field(default=0.0, description="执行耗时(毫秒)")

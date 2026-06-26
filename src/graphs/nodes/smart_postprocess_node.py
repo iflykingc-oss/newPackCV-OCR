@@ -1,26 +1,3 @@
-<<<<<<< HEAD
-#!/usr/bin/env python3
-"""智能后处理节点 - V7.0新增
-
-学习LlamaParse的Agentic自纠错设计：
-- 字段验证（必填、类型、格式）
-- 置信度评估
-- 智能纠错（低置信度字段重新提取）
-- 数据标准化
-"""
-import os
-import json
-import logging
-import re
-from datetime import datetime
-from typing import Dict, Any, List
-from langchain_core.runnables import RunnableConfig
-from langgraph.runtime import Runtime
-from coze_coding_utils.runtime_ctx.context import Context
-
-from graphs.state import SmartPostprocessInput, SmartPostprocessOutput
-from scenarios import get_scenario_schema
-=======
 # -*- coding: utf-8 -*-
 """
 智能后处理节点 (Smart Postprocess Node) - V5.9
@@ -42,133 +19,10 @@ from langchain_core.messages import SystemMessage, HumanMessage
 from jinja2 import Template
 
 from graphs.state import SmartPostprocessInput, SmartPostprocessOutput
->>>>>>> origin/main
 
 logger = logging.getLogger(__name__)
 
 
-<<<<<<< HEAD
-# 通用校验规则
-VALIDATION_RULES = {
-    "date": r'^\d{4}[-/.]\d{1,2}[-/.]\d{1,2}',
-    "amount": r'^\d+\.?\d*',
-    "phone": r'^1[3-9]\d{9}$',
-    "id_card": r'^\d{17}[\dXx]$',
-}
-
-
-def _validate_field(field_name: str, value: str, field_type: str = "text") -> tuple:
-    """验证单个字段，返回 (is_valid, error_msg)"""
-    if not value or value == "":
-        return True, ""  # 空值视为有效
-
-    if field_type in VALIDATION_RULES:
-        pattern = VALIDATION_RULES[field_type]
-        if not re.match(pattern, str(value)):
-            return False, f"格式不符合{field_type}类型"
-
-    return True, ""
-
-
-def _normalize_data(data: Dict[str, Any], scenario: str) -> Dict[str, Any]:
-    """数据标准化处理"""
-    normalized: Dict[str, Any] = {}
-
-    for key, value in data.items():
-        # 跳过非业务字段
-        if key in ["confidence", "raw_response", "parse_error", "error", "details"]:
-            normalized[key] = value
-            continue
-
-        # 字符串处理
-        if isinstance(value, str):
-            value = value.strip()
-            # 日期标准化 (YYYY/MM/DD -> YYYY-MM-DD)
-            if re.match(r'^\d{4}[/.]\d{1,2}[/.]\d{1,2}', value):
-                value = re.sub(r'[/.]', '-', value, count=2)
-            # 金额处理（去除多余空格和特殊字符）
-            if "amount" in key.lower() or "price" in key.lower() or "fee" in key.lower():
-                value = re.sub(r'[^\d.,¥$￥€£]', '', value).strip()
-            # 手机号处理
-            if "phone" in key.lower() or "tel" in key.lower() or "mobile" in key.lower():
-                value = re.sub(r'[^\d]', '', str(value))[:11]
-
-        normalized[key] = value
-
-    return normalized
-
-
-def _calculate_field_confidence(data: Dict[str, Any], scenario: str) -> Dict[str, float]:
-    """计算每个字段的置信度"""
-    confidences: Dict[str, float] = {}
-
-    total_fields = 0
-    filled_fields = 0
-    for key, value in data.items():
-        if key in ["confidence", "raw_response", "parse_error", "error", "details"]:
-            continue
-        total_fields += 1
-        if value and str(value).strip() and str(value).strip() != "":
-            filled_fields += 1
-            # 基础置信度：0.85（已填充）
-            confidences[key] = 0.85
-        else:
-            # 缺失字段：低置信度
-            confidences[key] = 0.3
-
-    # 整体置信度 = 填充率 * 基础置信度
-    fill_rate = filled_fields / total_fields if total_fields > 0 else 0
-    confidences["_overall"] = round(fill_rate * 0.95, 2)
-
-    return confidences
-
-
-def _detect_anomalies(data: Dict[str, Any], scenario: str) -> List[Dict[str, Any]]:
-    """异常检测"""
-    anomalies: List[Dict[str, Any]] = []
-
-    # 检测生产日期是否晚于保质期
-    prod_date = data.get("production_date", "")
-    expiry_date = data.get("expiry_date", "")
-    if prod_date and expiry_date:
-        try:
-            pd = datetime.strptime(prod_date[:10], "%Y-%m-%d")
-            ed = datetime.strptime(expiry_date[:10], "%Y-%m-%d")
-            if pd > ed:
-                anomalies.append({
-                    "type": "date_conflict",
-                    "fields": ["production_date", "expiry_date"],
-                    "message": "生产日期晚于保质期/到期日期",
-                    "severity": "high"
-                })
-        except (ValueError, TypeError):
-            pass
-
-    # 检测金额异常
-    for key in ["total_amount", "amount", "price", "contract_amount"]:
-        value = data.get(key, "")
-        if value:
-            try:
-                amount = float(re.sub(r'[^\d.]', '', str(value)))
-                if amount < 0:
-                    anomalies.append({
-                        "type": "negative_amount",
-                        "fields": [key],
-                        "message": f"{key} 为负数",
-                        "severity": "medium"
-                    })
-                elif amount > 1e9:
-                    anomalies.append({
-                        "type": "unusual_amount",
-                        "fields": [key],
-                        "message": f"{key} 异常大",
-                        "severity": "medium"
-                    })
-            except (ValueError, TypeError):
-                pass
-
-    return anomalies
-=======
 # ==================== 品类模板定义（从category_template_node迁移）====================
 
 CATEGORY_TEMPLATES: Dict[str, Dict[str, Any]] = {
@@ -410,7 +264,6 @@ def _infer_brand_from_rawtext(ocr_data: Dict[str, Any], raw_text: str) -> Dict[s
                 break
 
     return result
->>>>>>> origin/main
 
 
 def smart_postprocess_node(
@@ -420,59 +273,6 @@ def smart_postprocess_node(
 ) -> SmartPostprocessOutput:
     """
     title: 智能后处理
-<<<<<<< HEAD
-    desc: 数据标准化、字段验证、异常检测、置信度计算
-    integrations: 无
-    """
-    ctx = runtime.context
-
-    raw_data = state.structured_data
-    scenario = state.scenario_used or "general_document"
-
-    # 1. 复制原始数据
-    processed_data = dict(raw_data) if raw_data else {}
-
-    # 2. 数据标准化
-    normalized = _normalize_data(processed_data, scenario)
-
-    # 3. 异常检测
-    anomalies = _detect_anomalies(normalized, scenario)
-
-    # 4. 字段置信度计算
-    field_confidences = _calculate_field_confidence(normalized, scenario)
-    overall_confidence = field_confidences.pop("_overall", 0.5)
-
-    # 5. 尝试Pydantic校验
-    validation_errors: List[Dict[str, str]] = []
-    try:
-        schema_class = get_scenario_schema(scenario)
-        # 不强制校验，只记录错误
-        for key, value in normalized.items():
-            if hasattr(schema_class, '__fields__') and key in schema_class.__fields__:
-                field_info = schema_class.__fields__[key]
-                # 检查必填
-                if field_info.is_required() and (value == "" or value is None):
-                    validation_errors.append({
-                        "field": key,
-                        "error": "required_field_missing"
-                    })
-    except Exception as e:
-        logger.warning(f"Schema校验异常: {e}")
-
-    # 6. 构造后处理结果
-    postprocessed = dict(normalized)
-    postprocessed["confidence"] = overall_confidence
-    postprocessed["validation_errors"] = validation_errors if validation_errors else []
-
-    logger.info(f"智能后处理完成: scenario={scenario}, fields={len(normalized)}, anomalies={len(anomalies)}, confidence={overall_confidence}")
-
-    return SmartPostprocessOutput(
-        structured_data=postprocessed,
-        confidence=overall_confidence,
-        anomalies=anomalies,
-        field_confidences=field_confidences,
-        validation_errors=validation_errors,
-=======
     desc: 合并知识推理+品类模板，一次LLM调用完成推理补全+品类匹配+字段验证+优先级重排，减少串行LLM调用
     integrations: 大语言模型
     """
@@ -621,5 +421,4 @@ def smart_postprocess_node(
         reordered_data=reordered,
         inferred_fields=inferred_fields,
         inferred_product_type=inferred_product_type or detected_category,
->>>>>>> origin/main
     )
