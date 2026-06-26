@@ -1,0 +1,51 @@
+[build-system]
+requires = ["setuptools>=61.0", "wheel"]
+build-backend = "setuptools.build_meta"
+
+[project]
+name = "packcv-ocr"
+version = "6.3.0"
+description = "Official Python SDK for VibeCoding-OCR (8-scenario multimodal OCR + document parsing)"
+readme = "README.md"
+license = { text = "Apache-2.0" }
+authors = [
+    { name = "VibeCoding Team", email = "team@vibecoding.dev" }
+]
+maintainers = [
+    { name = "VibeCoding Team", email = "team@vibecoding.dev" }
+]
+keywords = ["ocr", "document-ai", "vlm", "multimodal", "sdk", "packcv", "extraction"]
+classifiers = [
+    "Development Status :: 5 - Production/Stable",
+    "Intended Audience :: Developers",
+    "License :: OSI Approved :: Apache Software License",
+    "Programming Language :: Python :: 3",
+    "Programming Language :: Python :: 3.8",
+    "Programming Language :: Python :: 3.9",
+    "Programming Language :: Python :: 3.10",
+    "Programming Language :: Python :: 3.11",
+    "Programming Language :: Python :: 3.12",
+    "Topic :: Software Development :: Libraries :: Python Modules",
+]
+requires-python = ">=3.8"
+dependencies = []
+
+[project.optional-dependencies]
+async = ["aiohttp>=3.9"]
+dev = [
+    "pytest>=7.0",
+    "pytest-asyncio>=0.21",
+    "mypy>=1.0",
+    "black>=23.0",
+    "ruff>=0.1.0",
+]
+
+[project.urls]
+Homepage = "https://github.com/iflykingc-oss/newPackCV-OCR"
+Documentation = "https://github.com/iflykingc-oss/newPackCV-OCR#readme"
+Repository = "https://github.com/iflykingc-oss/newPackCV-OCR.git"
+Issues = "https://github.com/iflykingc-oss/newPackCV-OCR/issues"
+
+[tool.setuptools.packages.find]
+where = ["."]
+include = ["packcv*"]

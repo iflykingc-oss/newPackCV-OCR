@@ -73,3 +73,43 @@
 - `src/tests/unit/` — 42个单元测试
 - `src/tests/integration/` — 23个集成测试
 - 总计: 65个用例
+
+## 商业化模块 (V6.3.0+)
+
+| 模块 | 路径 | 功能 |
+|------|------|------|
+| 营销页面 | `src/web/marketing_routes.py` | 公开 landing/pricing/signup/demo |
+| Python SDK | `sdk/python/` | 官方客户端 SDK (17 测试通过) |
+| 客户文档 | `docs/customer/` | quickstart/api/scenarios/webhooks/best-practices |
+| 定价文档 | `docs/customer/pricing.md` | 4 档套餐 + 引擎单价 |
+| 安全合规 | `docs/customer/security.md` | 加密/合规/SLA/私有化 |
+| 行业案例 | `docs/case-studies/industry-roi.md` | 5 真实案例 + ROI 数据 |
+
+## Phase 4-7 企业级模块 (V6.3.0+)
+
+| 模块 | 路径 | 功能 |
+|------|------|------|
+| 断路器 | `src/resilience/` | 故障隔离/熔断 |
+| 智能增强 | `src/intelligence/` | LLM 缓存/小样本/AB 测试 |
+| 鉴权 | `src/auth_sso/` | SSO/RBAC/JWT |
+| 多租户 | `src/tenancy/` | 租户隔离/配额 |
+| 计费 | `src/billing/` | 用量计费/账单 |
+| 监控 | `src/monitoring/` | Prometheus 指标 |
+| 安全 | `src/security/` | 字段脱敏/审计 |
+| 国际化 | `src/i18n/` | 10 语种 + 7 币种 |
+| Webhook | `src/webhook/` | 异步推送 + 重试 |
+| API 版本 | `src/api_versioning/` | URL 路径版本管理 |
+| GraphQL | `src/gql_api/` | GraphQL 端点 |
+| 灰度 | `src/gradual_rollout/` | 灰度发布 |
+| 追踪 | `src/tracing/` | OpenTelemetry 分布式追踪 |
+| 错误码 | `src/errors/` | 全局错误码注册 |
+| 热更新 | `src/config_hotreload/` | 配置运行时热更新 |
+| 数据血缘 | `src/data_lineage/` | 字段级数据血缘 |
+| 审计 | `src/audit/` | 不可篡改审计日志 |
+| MCP Server | `src/mcp_server/` | Model Context Protocol |
+| 流式响应 | `src/streaming/` | Server-Sent Events |
+| CLI | `src/cli/` | 命令行管理工具 |
+| 备份 | `src/storage/` | 备份恢复/多存储后端 |
+| 核心引擎 | `src/core/` | 核心 cv/llm/ocr/rule_engine |
+| 场景 | `src/scenarios/` | 场景定义 (新位置) |
+| Web | `src/web/` | 营销 + 仪表板 |

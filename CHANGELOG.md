@@ -5,6 +5,32 @@ All notable changes to PackCV-OCR will be documented in this file.
 The format is based on [Keep a Changelog](https://keepachangelog.com/en/1.1.0/),
 and this project adheres to [Semantic Versioning](https://semver.org/spec/v2.0.0.html).
 
+## [6.3.0] - 2026-01-25
+
+### 🏗 集成 (Integration) — Phase 4-7 企业级模块
+- **Phase 4: 稳定性**: 断路器(`resilience/`) + 健康探针 + 优雅关停 + CLI 工具 + 性能基准 + 备份恢复
+- **Phase 5: 智能化 + 企业级**: LLM缓存/小样本学习/AB测试(`intelligence/`) + SSO/RBAC(`auth_sso/`) + 多租户(`tenancy/`) + 计费引擎(`billing/`) + 数据脱敏(`security/`) + 国际化(`i18n/`) + Webhook
+- **Phase 6: API 增强**: API版本管理 + GraphQL (`gql_api/`) + 限流仪表盘 + 灰度发布(`gradual_rollout/`) + Web i18n
+- **Phase 7: 可观测性**: 分布式追踪(`tracing/`) + 错误码注册中心(`errors/`) + 配置热更新(`config_hotreload/`) + 数据血缘(`data_lineage/`) + 审计日志(`audit/`) + MCP Server + 流式响应
+
+### 🔧 修复 (Fixes)
+- **远程仓库合并冲突**: 解决 `origin/main` 残留的 52 处合并冲突标记 (17 个文件)。采用 V6.2.0 干净基线 + 增量引入 Phase 4-7 新模块的方式重组。
+- **API 双入口问题**: `web_server.py` (V6.2.0) 与 `api/main.py` (Phase 5) 共存问题已规划整合
+
+### 💼 商业化 (Commercialization)
+- **营销页面** (`src/web/marketing_routes.py`): 公开访问的 landing / pricing / signup / demo 页面 (无需登录)
+- **客户文档** (`docs/customer/`): 5 分钟快速开始 + 完整 API 参考 + 场景详解 + Webhook 集成 + 最佳实践
+- **定价方案** (`docs/customer/pricing.md`): Free / Starter / Pro / Enterprise 4 档套餐 + 引擎单价 + 优惠策略
+- **安全合规** (`docs/customer/security.md`): 加密 / 隔离 / 脱敏 / 合规认证 / 私有化部署
+- **行业案例** (`docs/case-studies/industry-roi.md`): 5 个真实客户案例 + ROI 详细数据 (¥40-500 万/年节省)
+- **Python SDK** (`sdk/python/`): 官方 Python SDK,17 个测试全部通过
+
+### 🛠 工程化 (Engineering)
+- README 顶部新增「为什么选择 VibeCoding-OCR」+ ROI 数据对比
+- 19 个商业化新文件提交
+
+---
+
 ## [6.2.0] - 2026-01-24
 
 ### 🔧 修复 (Fixes)

@@ -13,18 +13,37 @@ import logging
 from typing import Optional, Dict, Any, Callable
 from functools import wraps
 
-from opentelemetry import trace
-from opentelemetry.sdk.trace import TracerProvider
-from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
-from opentelemetry.sdk.resources import Resource, SERVICE_NAME, SERVICE_VERSION
-from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
-from opentelemetry.trace import Status, StatusCode, Span
+# OpenTelemetry 是可选依赖;未安装时使用 no-op stub,保证系统可启动
+try:
+    from opentelemetry import trace
+    from opentelemetry.sdk.trace import TracerProvider
+    from opentelemetry.sdk.trace.export import BatchSpanProcessor, ConsoleSpanExporter
+    from opentelemetry.sdk.resources import Resource, SERVICE_NAME, SERVICE_VERSION
+    from opentelemetry.instrumentation.fastapi import FastAPIInstrumentor
+    from opentelemetry.trace import Status, StatusCode, Span
+    _OPENTELEMETRY_AVAILABLE = True
+except ImportError:  # noqa: BLE001
+    _OPENTELEMETRY_AVAILABLE = False
+    logger_fallback = logging.getLogger(__name__ + ".fallback")
+    logger_fallback.info("opentelemetry not installed, using no-op tracer stub")
+    # No-op stub 类型
+    Status = None  # type: ignore
+    StatusCode = None  # type: ignore
+    Span = None  # type: ignore
+    TracerProvider = None  # type: ignore
+    BatchSpanProcessor = None  # type: ignore
+    ConsoleSpanExporter = None  # type: ignore
+    Resource = None  # type: ignore
+    SERVICE_NAME = "service.name"  # type: ignore
+    SERVICE_VERSION = "service.version"  # type: ignore
+    FastAPIInstrumentor = None  # type: ignore
+    trace = None  # type: ignore
 
 logger = logging.getLogger(__name__)
 
 # 全局 tracer
-_tracer: Optional[trace.Tracer] = None
-_provider: Optional[TracerProvider] = None
+_tracer: Optional[Any] = None
+_provider: Optional[Any] = None
 
 
 def init_tracing(
@@ -33,7 +52,7 @@ def init_tracing(
     exporter_type: str = "console",
     otlp_endpoint: Optional[str] = None,
     sample_rate: float = 1.0
-) -> trace.Tracer:
+) -> Any:
     """初始化 OpenTelemetry 追踪
     
     Args:
@@ -47,10 +66,15 @@ def init_tracing(
         Tracer 实例
     """
     global _tracer, _provider
-    
+
+    if not _OPENTELEMETRY_AVAILABLE:
+        logger.info("opentelemetry not available, returning no-op tracer")
+        _tracer = _NoOpTracer()
+        return _tracer
+
     if _tracer is not None:
         return _tracer
-    
+
     # 创建 Resource
     resource = Resource.create({
         SERVICE_NAME: service_name,
@@ -58,10 +82,10 @@ def init_tracing(
         "service.namespace": "packcv",
         "service.instance.id": os.getenv("HOSTNAME", "local"),
     })
-    
+
     # 创建 TracerProvider
     _provider = TracerProvider(resource=resource)
-    
+
     # 选择导出器
     if exporter_type == "console":
         exporter = ConsoleSpanExporter()
@@ -74,22 +98,22 @@ def init_tracing(
             exporter = ConsoleSpanExporter()
     else:
         exporter = ConsoleSpanExporter()
-    
+
     # 添加 Span Processor
     _provider.add_span_processor(BatchSpanProcessor(exporter))
-    
+
     # 设置全局 TracerProvider
     trace.set_tracer_provider(_provider)
-    
+
     # 获取 Tracer
     _tracer = trace.get_tracer(service_name, service_version)
-    
+
     logger.info(f"OpenTelemetry initialized: {service_name}@{service_version}, exporter={exporter_type}")
-    
+
     return _tracer
 
 
-def get_tracer() -> trace.Tracer:
+def get_tracer() -> Any:
     """获取全局 Tracer"""
     global _tracer
     if _tracer is None:
@@ -97,8 +121,11 @@ def get_tracer() -> trace.Tracer:
     return _tracer
 
 
-def instrument_fastapi(app):
+def instrument_fastapi(app: Any) -> None:
     """自动注入 FastAPI 追踪"""
+    if not _OPENTELEMETRY_AVAILABLE or FastAPIInstrumentor is None:
+        logger.info("opentelemetry instrumentation not available, skipping")
+        return
     FastAPIInstrumentor.instrument_app(app)
     logger.info("FastAPI instrumented for OpenTelemetry")
 
@@ -225,9 +252,41 @@ def traced(name: str) -> Callable:
     return decorator
 
 
-def shutdown_tracing():
+def shutdown_tracing() -> None:
     """关闭追踪 (flush pending spans)"""
     global _provider
-    if _provider:
+    if _provider and hasattr(_provider, "shutdown"):
         _provider.shutdown()
         logger.info("OpenTelemetry shutdown complete")
+
+
+class _NoOpSpan:
+    """无 OpenTelemetry 时的占位 Span"""
+
+    def set_attribute(self, key: str, value: Any) -> None:
+        pass
+
+    def set_status(self, *args: Any, **kwargs: Any) -> None:
+        pass
+
+    def record_exception(self, exc: Any) -> None:
+        pass
+
+    def end(self) -> None:
+        pass
+
+    def __enter__(self) -> "_NoOpSpan":
+        return self
+
+    def __exit__(self, *args: Any) -> None:
+        pass
+
+
+class _NoOpTracer:
+    """无 OpenTelemetry 时的占位 Tracer"""
+
+    def start_as_current_span(self, name: str, **kwargs: Any) -> _NoOpSpan:
+        return _NoOpSpan()
+
+    def start_span(self, name: str, **kwargs: Any) -> _NoOpSpan:
+        return _NoOpSpan()

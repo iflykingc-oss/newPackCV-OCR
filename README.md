@@ -14,6 +14,36 @@
 
 ---
 
+## 💡 为什么选择 VibeCoding-OCR？
+
+| 我们的优势 | 竞品对比 |
+|----------|---------|
+| 🎯 **8 大行业场景开箱即用** | 多数 OCR 厂商只做通用文字,场景需自建 |
+| 🔄 **多引擎智能梯级** | 单一引擎故障即宕机,我们 4 级降级保障 99.95% SLA |
+| 🧠 **VLM-First 架构** | 传统 OCR 只能识别字符,VL 理解业务语义 |
+| 📊 **结构化字段输出** | OCR 输出非结构化文本,我们输出 JSON 业务字段 |
+| 🌍 **109 种语言** | 主流厂商支持 50-80 种 |
+| 🔌 **全格式输入** | 图片/PDF/DOCX/PPTX/XLSX 同一 API |
+| 💰 **明码标价** | 多数厂商按企业谈判,我们 ¥0.01-¥0.20/次 |
+| 🔓 **Apache 2.0 开源** | 闭源 OCR 厂商无审计,代码透明可定制 |
+| 🏢 **私有化部署** | SaaS 厂商无私有化,我们支持 VPC/专有云 |
+| 🔐 **数据本地化** | 海外厂商数据出境风险,我们支持境内/境外 |
+
+### 典型 ROI
+
+| 行业 | 场景 | 客户案例 | ROI |
+|------|------|---------|-----|
+| 🏪 零售连锁 | 票据自动化 | [案例 →](./docs/case-studies/industry-roi.md#案例-1-零售连锁票据自动化) | **500%** (¥150 万/年节省) |
+| 🏦 银行 | 流水审核 | [案例 →](./docs/case-studies/industry-roi.md#案例-3-银行流水智能审核) | **1200%** (¥420 万/年节省) |
+| 💊 医药 | GSP 合规 | [案例 →](./docs/case-studies/industry-roi.md#案例-2-医药流通-gsp-合规) | **300%** |
+| 📋 律所 | 合同审查 | [案例 →](./docs/case-studies/industry-roi.md#案例-4-律所合同智能审查) | **业务能力 3x 提升** |
+
+📊 **完整案例**: [docs/case-studies/industry-roi.md](./docs/case-studies/industry-roi.md)
+💰 **定价方案**: [docs/customer/pricing.md](./docs/customer/pricing.md)
+🚀 **30 天免费试用**: [vibecoding.dev/signup](https://vibecoding.dev/signup)
+
+---
+
 ## ✨ 核心能力
 
 ### 📸 全格式输入
