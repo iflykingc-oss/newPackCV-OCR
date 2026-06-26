@@ -1,0 +1,121 @@
+{% extends "base.html" %}
+{% block title %}{{ i18n.page_dashboard }} - PackCV{% endblock %}
+{% block page_title %}📊 {{ i18n.page_dashboard }}{% endblock %}
+{% block content %}
+
+<div class="grid grid-4" id="stat-cards">
+  <div class="stat-card"><div class="stat-label">总租户数</div><div class="stat-value" id="stat-tenants">-</div></div>
+  <div class="stat-card success"><div class="stat-label">本月调用</div><div class="stat-value" id="stat-calls">-</div></div>
+  <div class="stat-card warning"><div class="stat-label">本月 Tokens</div><div class="stat-value" id="stat-tokens">-</div></div>
+  <div class="stat-card danger"><div class="stat-label">系统状态</div><div class="stat-value" id="stat-status">-</div></div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <div>
+      <div class="card-title">租户分布</div>
+      <div class="card-subtitle">按套餐等级</div>
+    </div>
+  </div>
+  <canvas id="tierChart" style="max-height:280px;"></canvas>
+</div>
+
+<div class="grid grid-2">
+  <div class="card">
+    <div class="card-header"><div class="card-title">系统组件状态</div></div>
+    <div id="health-detail"><div class="loading"></div></div>
+  </div>
+  <div class="card">
+    <div class="card-header"><div class="card-title">LLM Provider 健康度</div></div>
+    <div id="providers-health"><div class="loading"></div></div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><div class="card-title">路由策略</div></div>
+  <div id="routing-rules"><div class="loading"></div></div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+(async () => {
+  // Dashboard 概览
+  try {
+    const data = await API.dashboard();
+    document.getElementById('stat-tenants').textContent = data.tenants.total;
+    document.getElementById('stat-calls').textContent = Utils.formatNumber(data.usage_this_month.total_calls);
+    document.getElementById('stat-tokens').textContent = Utils.formatNumber(data.usage_this_month.total_tokens);
+    document.getElementById('stat-status').textContent = data.system.redis ? '✓ 正常' : '⚠ 降级';
+    document.getElementById('stat-status').style.fontSize = '1.25rem';
+
+    // 套餐分布图
+    const tierCtx = document.getElementById('tierChart').getContext('2d');
+    new Chart(tierCtx, {
+      type: 'doughnut',
+      data: {
+        labels: Object.keys(data.tenants.by_tier),
+        datasets: [{ data: Object.values(data.tenants.by_tier), backgroundColor: ['#ef4444','#3b82f6','#10b981','#f59e0b','#6b7280'] }],
+      },
+      options: { responsive: true, maintainAspectRatio: false }
+    });
+  } catch (err) {
+    UI.toast('加载 Dashboard 失败: ' + err.message, 'danger');
+  }
+
+  // 系统健康
+  try {
+    const h = await API.dashboard && false || await fetch('/admin/dashboard/health').then(r => r.json());
+    const html = Object.entries(h.checks || {}).map(([k, v]) => {
+      const status = typeof v === 'string' ? v : (v.status || 'unknown');
+      const cls = status === 'ok' ? 'success' : 'warning';
+      return `<tr><td><strong>${k}</strong></td><td><span class="badge badge-${cls}">${status}</span></td></tr>`;
+    }).join('');
+    document.getElementById('health-detail').innerHTML = `<table class="table">${html || '<tr><td colspan=2 class="empty-state">无数据</td></tr>'}</table>`;
+  } catch (err) {
+    document.getElementById('health-detail').innerHTML = `<div class="alert alert-danger">加载失败: ${err.message}</div>`;
+  }
+
+  // Provider 健康度
+  try {
+    const ph = await API.providersHealth();
+    const providers = ph.providers || [];
+    const html = providers.length === 0 ? '<div class="empty-state">无 Provider</div>' : `
+      <table class="table">
+        <thead><tr><th>Provider</th><th>状态</th><th>成功率</th><th>平均延迟</th></tr></thead>
+        <tbody>${providers.map(p => `
+          <tr>
+            <td><strong>${p.name || p.provider_id}</strong></td>
+            <td><span class="badge ${p.enabled ? 'badge-success' : 'badge-neutral'}">${p.enabled ? '启用' : '禁用'}</span></td>
+            <td>${p.success_rate != null ? Utils.formatPercent(p.success_rate) : '-'}</td>
+            <td>${p.avg_latency_ms != null ? p.avg_latency_ms + 'ms' : '-'}</td>
+          </tr>`).join('')}</tbody>
+      </table>`;
+    document.getElementById('providers-health').innerHTML = html;
+  } catch (err) {
+    document.getElementById('providers-health').innerHTML = `<div class="alert alert-danger">加载失败: ${err.message}</div>`;
+  }
+
+  // 路由策略
+  try {
+    const r = await API.providersRouting();
+    const rules = r.routing_rules || [];
+    const html = rules.length === 0 ? '<div class="empty-state">无规则</div>' : `
+      <table class="table">
+        <thead><tr><th>规则</th><th>描述</th><th>优先级</th><th>链路</th></tr></thead>
+        <tbody>${rules.map(rule => `
+          <tr>
+            <td><code>${rule.rule_id}</code></td>
+            <td>${rule.description || '-'}</td>
+            <td><span class="badge badge-info">P${rule.priority || '-'}</span></td>
+            <td>${(rule.chain || []).join(' → ')}</td>
+          </tr>`).join('')}</tbody>
+      </table>`;
+    document.getElementById('routing-rules').innerHTML = html;
+  } catch (err) {
+    document.getElementById('routing-rules').innerHTML = `<div class="alert alert-danger">加载失败: ${err.message}</div>`;
+  }
+})();
+</script>
+{% endblock %}

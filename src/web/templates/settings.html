@@ -1,0 +1,125 @@
+{% extends "base.html" %}
+{% block title %}{{ i18n.page_settings }} - PackCV{% endblock %}
+{% block page_title %}⚙️ {{ i18n.page_settings }}{% endblock %}
+{% block content %}
+
+<div class="grid grid-2">
+  <div class="card">
+    <div class="card-header"><div class="card-title">API 密钥</div></div>
+    <div class="form-group">
+      <label class="form-label">X-API-Key（浏览器端）</label>
+      <input class="form-input" id="settings-api-key" placeholder="pk_xxx">
+    </div>
+    <div class="form-group">
+      <label class="form-label">默认租户</label>
+      <input class="form-input" id="settings-default-tenant" placeholder="demo">
+    </div>
+    <button class="btn btn-primary" onclick="saveSettings()">保存</button>
+  </div>
+
+  <div class="card">
+    <div class="card-header"><div class="card-title">主题</div></div>
+    <div class="form-group">
+      <label class="form-label">外观</label>
+      <select class="form-select" id="settings-theme">
+        <option value="light">浅色</option>
+        <option value="dark">深色（即将支持）</option>
+      </select>
+    </div>
+    <div class="form-group">
+      <label class="form-label">语言</label>
+      <select class="form-select" id="settings-language">
+        <option value="zh-CN">简体中文</option>
+        <option value="en-US">English</option>
+      </select>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><div class="card-title">系统信息</div></div>
+  <div id="system-info"><div class="loading"></div></div>
+</div>
+
+<div class="card">
+  <div class="card-header"><div class="card-title">SDK 下载</div></div>
+  <div class="grid grid-2">
+    <div>
+      <h4>Python SDK</h4>
+      <pre class="code-block">pip install packcv-ocr</pre>
+      <p style="color:var(--text-muted);font-size:0.875rem;">支持 Python 3.9+</p>
+    </div>
+    <div>
+      <h4>JavaScript SDK</h4>
+      <pre class="code-block">npm install @packcv-ocr/sdk</pre>
+      <p style="color:var(--text-muted);font-size:0.875rem;">支持 Node.js 16+ 和现代浏览器</p>
+    </div>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><div class="card-title">告警 WebHook</div></div>
+  <div class="form-group">
+    <label class="form-label">回调 URL</label>
+    <input class="form-input" id="webhook-url" placeholder="https://your-team.com/alerts">
+  </div>
+  <div class="form-group">
+    <label class="form-label">事件类型</label>
+    <select class="form-select" id="webhook-events" multiple style="height:120px;">
+      <option value="task.completed" selected>task.completed</option>
+      <option value="task.failed">task.failed</option>
+      <option value="billing.threshold">billing.threshold</option>
+      <option value="quota.exceeded">quota.exceeded</option>
+      <option value="model.fallback">model.fallback</option>
+    </select>
+  </div>
+  <button class="btn btn-primary" onclick="subscribeWebhook()">订阅</button>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+document.getElementById('settings-api-key').value = localStorage.getItem('packcv_api_key') || '';
+document.getElementById('settings-default-tenant').value = localStorage.getItem('packcv_tenant') || 'demo';
+
+function saveSettings() {
+  localStorage.setItem('packcv_api_key', document.getElementById('settings-api-key').value);
+  localStorage.setItem('packcv_tenant', document.getElementById('settings-default-tenant').value);
+  UI.toast('已保存', 'success');
+}
+
+(async () => {
+  try {
+    const h = await API.health();
+    const d = await API.dashboard();
+    document.getElementById('system-info').innerHTML = `
+      <table class="table">
+        <tr><td><strong>API 版本</strong></td><td>${d.system.version}</td></tr>
+        <tr><td><strong>环境</strong></td><td><span class="badge badge-${d.system.env === 'prod' ? 'danger' : 'info'}">${d.system.env}</span></td></tr>
+        <tr><td><strong>Redis</strong></td><td><span class="badge ${d.system.redis ? 'badge-success' : 'badge-danger'}">${d.system.redis ? '连接正常' : '连接异常'}</span></td></tr>
+        <tr><td><strong>服务状态</strong></td><td><span class="badge badge-success">${h.status || 'healthy'}</span></td></tr>
+        <tr><td><strong>API 端点</strong></td><td>${window.location.origin}</td></tr>
+      </table>`;
+  } catch (err) {
+    document.getElementById('system-info').innerHTML = `<div class="alert alert-danger">加载失败: ${err.message}</div>`;
+  }
+})();
+
+async function subscribeWebhook() {
+  const url = document.getElementById('webhook-url').value;
+  const events = Array.from(document.getElementById('webhook-events').selectedOptions).map(o => o.value);
+  if (!url || events.length === 0) { UI.toast('请填写 URL 并选择至少一个事件', 'warning'); return; }
+  try {
+    await API.webhookSubscribe({
+      tenant_id: localStorage.getItem('packcv_tenant') || 'demo',
+      url, events,
+      secret: Math.random().toString(36).substring(2, 18),
+    });
+    UI.toast('订阅成功', 'success');
+  } catch (err) {
+    UI.toast('订阅失败: ' + err.message, 'danger');
+  }
+}
+</script>
+{% endblock %}

@@ -1,0 +1,68 @@
+{% extends "base.html" %}
+{% block title %}{{ i18n.page_billing }} - PackCV{% endblock %}
+{% block page_title %}💰 {{ i18n.page_billing }}{% endblock %}
+{% block content %}
+
+<div class="grid grid-4">
+  <div class="stat-card success"><div class="stat-label">本月收入</div><div class="stat-value">¥128,450</div><div class="stat-meta">+12.5% vs 上月</div></div>
+  <div class="stat-card"><div class="stat-label">计费租户</div><div class="stat-value">42</div></div>
+  <div class="stat-card warning"><div class="stat-label">未结清</div><div class="stat-value">¥8,720</div></div>
+  <div class="stat-card danger"><div class="stat-label">退款</div><div class="stat-value">¥320</div></div>
+</div>
+
+<div class="card">
+  <div class="card-header">
+    <div class="card-title">账单列表</div>
+    <div>
+      <input class="form-input" placeholder="搜索租户ID" style="width:200px;display:inline-block;" id="search-input">
+    </div>
+  </div>
+  <div id="invoices-list"><div class="loading"></div></div>
+</div>
+
+<div class="card">
+  <div class="card-header"><div class="card-title">收入趋势</div></div>
+  <canvas id="revenueChart" style="max-height:280px;"></canvas>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+const mockInvoices = [
+  { id: 'INV-2026-001', tenant: '电商平台A', tier: 'FLAGSHIP', amount: 28900, status: 'paid', date: '2026-06-25' },
+  { id: 'INV-2026-002', tenant: '金融科技B', tier: 'ENTERPRISE', amount: 18500, status: 'paid', date: '2026-06-25' },
+  { id: 'INV-2026-003', tenant: '物流公司C', tier: 'PRO', amount: 6800, status: 'pending', date: '2026-06-24' },
+  { id: 'INV-2026-004', tenant: '教育机构D', tier: 'BASIC', amount: 1200, status: 'paid', date: '2026-06-23' },
+  { id: 'INV-2026-005', tenant: '医疗集团E', tier: 'PRO', amount: 5400, status: 'overdue', date: '2026-06-15' },
+];
+function renderInvoices(filter='') {
+  const list = mockInvoices.filter(i => i.tenant.includes(filter) || i.id.includes(filter));
+  const html = `
+    <table class="table">
+      <thead><tr><th>账单号</th><th>租户</th><th>套餐</th><th>金额</th><th>状态</th><th>日期</th><th>操作</th></tr></thead>
+      <tbody>${list.map(i => `
+        <tr>
+          <td><code>${i.id}</code></td>
+          <td>${i.tenant}</td>
+          <td>${Utils.getTierBadge(i.tier)}</td>
+          <td><strong>¥${i.amount.toLocaleString()}</strong></td>
+          <td><span class="badge ${i.status === 'paid' ? 'badge-success' : i.status === 'pending' ? 'badge-warning' : 'badge-danger'}">${i.status === 'paid' ? '已支付' : i.status === 'pending' ? '待支付' : '逾期'}</span></td>
+          <td>${i.date}</td>
+          <td><button class="btn btn-secondary btn-sm">下载</button></td>
+        </tr>`).join('')}</tbody>
+    </table>`;
+  document.getElementById('invoices-list').innerHTML = list.length ? html : '<div class="empty-state">无账单</div>';
+}
+document.getElementById('search-input').addEventListener('input', e => renderInvoices(e.target.value));
+renderInvoices();
+
+// 收入趋势
+const months = ['1月','2月','3月','4月','5月','6月'];
+new Chart(document.getElementById('revenueChart').getContext('2d'), {
+  type: 'bar',
+  data: { labels: months, datasets: [{ label: '收入(元)', data: [85000,92000,105000,118000,125000,128450], backgroundColor: '#10b981' }] },
+  options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+});
+</script>
+{% endblock %}

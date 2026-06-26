@@ -1,0 +1,135 @@
+{% extends "base.html" %}
+{% block title %}{{ i18n.page_tenants }} - PackCV{% endblock %}
+{% block page_title %}👥 {{ i18n.page_tenants }}{% endblock %}
+{% block content %}
+
+<div class="card">
+  <div class="card-header">
+    <div>
+      <div class="card-title">租户列表</div>
+      <div class="card-subtitle">管理 API 访问凭证与配额</div>
+    </div>
+    <button class="btn btn-primary" onclick="showCreateTenant()">+ 新建租户</button>
+  </div>
+  <div id="tenants-list"><div class="loading"></div></div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+async function loadTenants() {
+  try {
+    const data = await API.tenants();
+    const tenants = data.tenants || [];
+    if (tenants.length === 0) {
+      document.getElementById('tenants-list').innerHTML = '<div class="empty-state"><div class="empty-state-icon">📭</div>暂无租户</div>';
+      return;
+    }
+    const html = `
+      <table class="table">
+        <thead><tr>
+          <th>租户ID</th><th>名称</th><th>套餐</th><th>状态</th><th>API Key</th><th>创建时间</th><th>操作</th>
+        </tr></thead>
+        <tbody>${tenants.map(t => `
+          <tr>
+            <td><code>${t.tenant_id}</code></td>
+            <td>${t.name || '-'}</td>
+            <td>${Utils.getTierBadge(t.tier)}</td>
+            <td><span class="badge ${t.active !== false ? 'badge-success' : 'badge-danger'}">${t.active !== false ? '活跃' : '已停用'}</span></td>
+            <td>
+              <code style="font-size:0.75rem;cursor:pointer;color:var(--primary);" onclick="Utils.copyToClipboard('${t.api_key}')">${t.api_key ? t.api_key.substring(0, 16) + '...' : '-'}</code>
+            </td>
+            <td>${Utils.formatDate(t.created_at)}</td>
+            <td>
+              <button class="btn btn-secondary btn-sm" onclick="showTenantDetail('${t.tenant_id}')">详情</button>
+              <button class="btn btn-danger btn-sm" onclick="deleteTenant('${t.api_key}')">删除</button>
+            </td>
+          </tr>`).join('')}</tbody>
+      </table>`;
+    document.getElementById('tenants-list').innerHTML = html;
+  } catch (err) {
+    document.getElementById('tenants-list').innerHTML = `<div class="alert alert-danger">加载失败: ${err.message}</div>`;
+  }
+}
+
+function showCreateTenant() {
+  UI.modal('新建租户', `
+    <div class="form-group">
+      <label class="form-label">租户ID</label>
+      <input class="form-input" id="new-tenant-id" placeholder="my-company">
+    </div>
+    <div class="form-group">
+      <label class="form-label">名称</label>
+      <input class="form-input" id="new-tenant-name" placeholder="我的公司">
+    </div>
+    <div class="form-group">
+      <label class="form-label">套餐</label>
+      <select class="form-select" id="new-tenant-tier">
+        <option value="FREE">FREE - 免费</option>
+        <option value="BASIC" selected>BASIC - 基础</option>
+        <option value="PRO">PRO - 专业</option>
+        <option value="ENTERPRISE">ENTERPRISE - 企业</option>
+        <option value="FLAGSHIP">FLAGSHIP - 旗舰</option>
+      </select>
+    </div>
+  `, `
+    <button class="btn btn-secondary" onclick="UI.closeModal()">取消</button>
+    <button class="btn btn-primary" onclick="createTenant()">创建</button>
+  `);
+}
+
+async function createTenant() {
+  const data = {
+    tenant_id: document.getElementById('new-tenant-id').value,
+    name: document.getElementById('new-tenant-name').value,
+    tier: document.getElementById('new-tenant-tier').value,
+  };
+  if (!data.tenant_id) { UI.toast('请输入租户ID', 'warning'); return; }
+  try {
+    const r = await API.createTenant(data);
+    UI.toast('创建成功', 'success');
+    UI.closeModal();
+    UI.modal('租户凭证', `
+      <div class="alert alert-warning">⚠️ 请妥善保存，关闭后无法再次查看</div>
+      <div class="form-group"><label class="form-label">租户ID</label><div class="code-block">${r.tenant_id}</div></div>
+      <div class="form-group"><label class="form-label">API Key</label><div class="code-block">${r.api_key}</div><button class="btn btn-sm btn-secondary" style="margin-top:0.25rem;" onclick="Utils.copyToClipboard('${r.api_key}')">复制</button></div>
+      <div class="form-group"><label class="form-label">API Secret</label><div class="code-block">${r.api_secret || 'N/A'}</div></div>
+    `, `<button class="btn btn-primary" onclick="UI.closeModal();loadTenants()">完成</button>`);
+  } catch (err) {
+    UI.toast('创建失败: ' + err.message, 'danger');
+  }
+}
+
+async function deleteTenant(apiKey) {
+  if (!confirm('确定删除该租户？此操作不可恢复')) return;
+  try {
+    await API.deleteTenant(apiKey);
+    UI.toast('已删除', 'success');
+    loadTenants();
+  } catch (err) {
+    UI.toast('删除失败: ' + err.message, 'danger');
+  }
+}
+
+async function showTenantDetail(tenantId) {
+  try {
+    const [usage, webhooks] = await Promise.all([API.usage(tenantId), API.webhooksList(tenantId).catch(() => ({ subscriptions: [] }))]);
+    UI.modal(`租户详情 - ${tenantId}`, `
+      <h4 style="margin-bottom:0.5rem;">📊 本月用量</h4>
+      <div class="grid grid-3" style="margin-bottom:1.5rem;">
+        <div class="stat-card"><div class="stat-label">调用次数</div><div class="stat-value">${Utils.formatNumber(usage.call_count || 0)}</div></div>
+        <div class="stat-card success"><div class="stat-label">总 Tokens</div><div class="stat-value">${Utils.formatNumber(usage.total_tokens || 0)}</div></div>
+        <div class="stat-card warning"><div class="stat-label">费用</div><div class="stat-value">¥${(usage.cost || 0).toFixed(2)}</div></div>
+      </div>
+      <h4 style="margin-bottom:0.5rem;">🔔 WebHook 订阅</h4>
+      <p style="color:var(--text-muted);">${webhooks.subscriptions?.length || 0} 个订阅</p>
+    `, `<button class="btn btn-secondary" onclick="UI.closeModal()">关闭</button>`);
+  } catch (err) {
+    UI.toast('加载详情失败: ' + err.message, 'danger');
+  }
+}
+
+loadTenants();
+</script>
+{% endblock %}

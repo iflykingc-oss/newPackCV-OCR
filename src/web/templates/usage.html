@@ -1,0 +1,111 @@
+{% extends "base.html" %}
+{% block title %}{{ i18n.page_usage }} - PackCV{% endblock %}
+{% block page_title %}📈 {{ i18n.page_usage }}{% endblock %}
+{% block content %}
+
+<div class="card">
+  <div class="card-header">
+    <div class="card-title">调用趋势</div>
+    <div>
+      <select class="form-select" id="period-select" style="width:auto;display:inline-block;">
+        <option value="7d">近 7 天</option>
+        <option value="30d" selected>近 30 天</option>
+        <option value="90d">近 90 天</option>
+      </select>
+    </div>
+  </div>
+  <canvas id="trendChart" style="max-height:300px;"></canvas>
+</div>
+
+<div class="grid grid-2">
+  <div class="card">
+    <div class="card-header"><div class="card-title">场景分布</div></div>
+    <canvas id="scenarioChart" style="max-height:280px;"></canvas>
+  </div>
+  <div class="card">
+    <div class="card-header"><div class="card-title">模型使用</div></div>
+    <canvas id="modelChart" style="max-height:280px;"></canvas>
+  </div>
+</div>
+
+<div class="card">
+  <div class="card-header"><div class="card-title">Top 10 租户</div></div>
+  <div id="top-tenants"><div class="loading"></div></div>
+</div>
+
+{% endblock %}
+
+{% block scripts %}
+<script>
+// 模拟数据（实际生产从 Prometheus / 数据库查询）
+const mockTrend = () => {
+  const days = parseInt(document.getElementById('period-select').value);
+  const labels = [], calls = [], tokens = [];
+  for (let i = days - 1; i >= 0; i--) {
+    const d = new Date(); d.setDate(d.getDate() - i);
+    labels.push(d.toLocaleDateString('zh-CN'));
+    calls.push(Math.floor(Math.random() * 5000) + 1000);
+    tokens.push(Math.floor(Math.random() * 200000) + 50000);
+  }
+  return { labels, calls, tokens };
+};
+
+function renderTrend() {
+  const { labels, calls, tokens } = mockTrend();
+  const ctx = document.getElementById('trendChart').getContext('2d');
+  if (window._trendChart) window._trendChart.destroy();
+  window._trendChart = new Chart(ctx, {
+    type: 'line',
+    data: { labels, datasets: [
+      { label: '调用次数', data: calls, borderColor: '#4f46e5', backgroundColor: 'rgba(79,70,229,0.1)', tension: 0.3, yAxisID: 'y' },
+      { label: 'Tokens', data: tokens, borderColor: '#10b981', backgroundColor: 'rgba(16,185,129,0.1)', tension: 0.3, yAxisID: 'y1' },
+    ]},
+    options: {
+      responsive: true, maintainAspectRatio: false,
+      scales: { y: { type: 'linear', position: 'left', title: { display: true, text: '调用次数' } }, y1: { type: 'linear', position: 'right', grid: { drawOnChartArea: false }, title: { display: true, text: 'Tokens' } } }
+    }
+  });
+}
+
+const mockScenarios = [
+  { label: '身份证', value: 32 }, { label: '营业执照', value: 28 }, { label: '发票', value: 18 },
+  { label: '合同', value: 12 }, { label: '银行回单', value: 7 }, { label: '其他', value: 3 }
+];
+new Chart(document.getElementById('scenarioChart').getContext('2d'), {
+  type: 'pie',
+  data: { labels: mockScenarios.map(s => s.label), datasets: [{ data: mockScenarios.map(s => s.value), backgroundColor: ['#4f46e5','#10b981','#f59e0b','#ef4444','#3b82f6','#6b7280'] }] },
+  options: { responsive: true, maintainAspectRatio: false }
+});
+
+const mockModels = [
+  { label: 'doubao-pro-32k', value: 45 }, { label: 'kimi-128k', value: 25 },
+  { label: 'qwen-turbo', value: 20 }, { label: 'doubao-lite', value: 10 }
+];
+new Chart(document.getElementById('modelChart').getContext('2d'), {
+  type: 'bar',
+  data: { labels: mockModels.map(m => m.label), datasets: [{ label: '调用占比(%)', data: mockModels.map(m => m.value), backgroundColor: '#4f46e5' }] },
+  options: { responsive: true, maintainAspectRatio: false, plugins: { legend: { display: false } } }
+});
+
+const mockTopTenants = [
+  { name: '电商平台A', calls: 12500, tokens: 3200000 },
+  { name: '金融科技B', calls: 9800, tokens: 2500000 },
+  { name: '物流公司C', calls: 7500, tokens: 1900000 },
+  { name: '教育机构D', calls: 5200, tokens: 1300000 },
+  { name: '医疗集团E', calls: 4100, tokens: 1050000 },
+  { name: '制造业F', calls: 3800, tokens: 950000 },
+  { name: '零售连锁G', calls: 2900, tokens: 720000 },
+  { name: '媒体公司H', calls: 2200, tokens: 580000 },
+  { name: '法律服务I', calls: 1500, tokens: 380000 },
+  { name: '咨询公司J', calls: 1100, tokens: 280000 },
+];
+document.getElementById('top-tenants').innerHTML = `
+  <table class="table">
+    <thead><tr><th>#</th><th>租户</th><th>调用</th><th>Tokens</th></tr></thead>
+    <tbody>${mockTopTenants.map((t, i) => `<tr><td>${i+1}</td><td>${t.name}</td><td>${Utils.formatNumber(t.calls)}</td><td>${Utils.formatNumber(t.tokens)}</td></tr>`).join('')}</tbody>
+  </table>`;
+
+document.getElementById('period-select').addEventListener('change', renderTrend);
+renderTrend();
+</script>
+{% endblock %}
