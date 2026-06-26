@@ -69,6 +69,7 @@ dependencies = [
     "langchain-text-splitters>=1.1.2",
     "rapidocr-onnxruntime>=1.4.4",
     "easyocr>=1.7.2",
+    "pytest>=9.1.1",
 ]
 
 [project.urls]

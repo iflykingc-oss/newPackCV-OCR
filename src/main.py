@@ -13,8 +13,14 @@ except ImportError:
     import logging as _l
     _l.getLogger(__name__).warning("uvicorn not available")
 import time
-from fastapi import FastAPI, HTTPException, Request
-from fastapi.responses import StreamingResponse, JSONResponse
+try:
+    from fastapi import FastAPI, HTTPException, Request
+except ImportError:
+    FastAPI = HTTPException = Request = None
+try:
+    from fastapi.responses import StreamingResponse, JSONResponse
+except ImportError:
+    StreamingResponse = JSONResponse = None
 from langchain_core.runnables import RunnableConfig
 from langgraph.graph import StateGraph, END
 from langgraph.graph.state import CompiledStateGraph
@@ -239,7 +245,7 @@ class GraphService:
 
 
 service = GraphService()
-app = FastAPI()
+app = FastAPI() if FastAPI else None
 
 # OpenAI 兼容接口处理器
 openai_handler = OpenAIChatHandler(service)

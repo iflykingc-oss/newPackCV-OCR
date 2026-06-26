@@ -26,17 +26,14 @@ try:
     from coze_coding_dev_sdk.s3 import S3SyncStorage
     COZE_SDK_AVAILABLE = True
 except ImportError:
-    COZE_SDK_AVAILABLE = False
     S3SyncStorage = None
+    COZE_SDK_AVAILABLE = False
 
 logger = logging.getLogger(__name__)
 
 
-def _get_s3_storage():
+def _get_s3_storage() -> S3SyncStorage:
     """获取S3对象存储客户端"""
-    if not COZE_SDK_AVAILABLE:
-        logger.warning("coze_coding_dev_sdk not available, S3 sync disabled")
-        return None
     return S3SyncStorage(
         endpoint_url=os.getenv("COZE_BUCKET_ENDPOINT_URL"),
         access_key="",

@@ -8,7 +8,10 @@ from typing import Dict, Any, List
 from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from coze_coding_utils.runtime_ctx.context import Context
-from coze_coding_dev_sdk import LLMClient
+try:
+    from coze_coding_dev_sdk import LLMClient
+except ImportError:
+    LLMClient = None
 from langchain_core.messages import SystemMessage, HumanMessage
 from graphs.state import VlInfoExtractInput, VlInfoExtractOutput
 

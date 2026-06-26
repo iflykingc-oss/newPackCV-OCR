@@ -15,7 +15,10 @@ from langgraph.runtime import Runtime
 from coze_coding_utils.runtime_ctx.context import Context
 from graphs.state import CorrectTextInput, CorrectTextOutput
 from langchain_core.messages import SystemMessage, HumanMessage
-from coze_coding_dev_sdk import LLMClient
+try:
+    from coze_coding_dev_sdk import LLMClient
+except ImportError:
+    LLMClient = None
 
 
 def correct_text_node(

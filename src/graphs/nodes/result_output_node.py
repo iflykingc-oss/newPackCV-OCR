@@ -15,7 +15,10 @@ from langchain_core.runnables import RunnableConfig
 from langgraph.runtime import Runtime
 from coze_coding_utils.runtime_ctx.context import Context
 from graphs.state import ResultOutputInput, ResultOutputOutput
-from coze_coding_dev_sdk.s3 import S3SyncStorage
+try:
+    from coze_coding_dev_sdk.s3 import S3SyncStorage
+except ImportError:
+    S3SyncStorage = None
 
 logger = logging.getLogger(__name__)
 
